@@ -453,8 +453,50 @@ export const submitStudentExam = async (
 
   let score = 0;
   exam.questions.forEach(q => {
+    const studentAnswer = answers[q.id];
+    if (studentAnswer === undefined || studentAnswer === null) return;
+
     if (q.type === 'multiple_choice' || q.type === 'true_false') {
-      if (answers[q.id] === q.correctAnswer) score += q.score;
+      // مقارنة مباشرة
+      if (studentAnswer === q.correctAnswer) score += q.score;
+
+    } else if (q.type === 'fill_blank') {
+      // إجابة fill_blank: نص — نقارن بعد تنظيف المسافات وتجاهل حالة الأحرف
+      const correct = (q.correctAnswer as string || '').trim().toLowerCase();
+      const given   = (studentAnswer as string || '').trim().toLowerCase();
+      if (given && given === correct) score += q.score;
+
+    } else if (q.type === 'compare') {
+      // إجابة compare: مصفوفة من الإجابات لكل عنصر
+      // correctAnswer مخزن كـ JSON array أو string مفصول بـ "|"
+      if (Array.isArray(studentAnswer) && q.correctAnswer) {
+        let correctAnswers: string[] = [];
+        try {
+          correctAnswers = typeof q.correctAnswer === 'string'
+            ? JSON.parse(q.correctAnswer)
+            : (q.correctAnswer as unknown as string[]);
+        } catch {
+          correctAnswers = (q.correctAnswer as string).split('|');
+        }
+        const totalParts   = correctAnswers.length;
+        const correctParts = studentAnswer.filter(
+          (ans, i) => (ans || '').trim().toLowerCase() === (correctAnswers[i] || '').trim().toLowerCase()
+        ).length;
+        // درجة جزئية: نسبة الأجزاء الصح
+        if (totalParts > 0) {
+          score += Math.round((correctParts / totalParts) * q.score);
+        }
+      }
+
+    } else if (q.type === 'short_answer') {
+      // short_answer: تصحيح يدوي — مش بيتحسب أوتوماتيك
+      // بس لو المدرس حط correctAnswer نقارن بيه
+      if (q.correctAnswer) {
+        const correct = (q.correctAnswer as string).trim().toLowerCase();
+        const given   = (studentAnswer as string || '').trim().toLowerCase();
+        if (given && given === correct) score += q.score;
+      }
+      // essay: تصحيح يدوي فقط — مش بيتحسب أوتوماتيك
     }
   });
 

@@ -13,6 +13,10 @@ import Unauthorized from './pages/Unauthorized';
 // App pages
 import Dashboard from './pages/Dashboard';
 import StudentsManagement from './pages/StudentsManagement';
+import StudentNew from './pages/StudentNew';
+import StudentDetail from './pages/StudentDetail';
+import ClassDetail from './pages/ClassDetail';
+import StudentExam from './pages/StudentExam';
 import MaterialsManagement from './pages/MaterialsManagement';
 import Placeholder from './pages/Placeholder';
 import SettingsPage from './pages/Settings';
@@ -25,6 +29,7 @@ import SystemAdmin from './pages/SystemAdmin';
 import ExamsList from './pages/ExamsList';
 import CreateExam from './pages/CreateExam';
 import ExamSettings from './pages/ExamSettings';
+import ExamResults from './pages/ExamResults';
 import TakeExam from './pages/TakeExam';
 import ExamReview from './pages/ExamReview';
 
@@ -84,7 +89,7 @@ function App() {
               path="/students/new"
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
-                  <Placeholder title="إضافة طالب جديد" phase="المرحلة 3" />
+                  <StudentNew />
                 </ProtectedRoute>
               }
             />
@@ -92,7 +97,7 @@ function App() {
               path="/students/:id"
               element={
                 <ProtectedRoute allowedRoles={['admin', 'teacher']}>
-                  <Placeholder title="بيانات الطالب" phase="المرحلة 3" />
+                  <StudentDetail />
                 </ProtectedRoute>
               }
             />
@@ -108,7 +113,7 @@ function App() {
               path="/classes/:id"
               element={
                 <ProtectedRoute allowedRoles={['admin', 'teacher']}>
-                  <Placeholder title="تفاصيل الفصل" phase="المرحلة 3" />
+                  <ClassDetail />
                 </ProtectedRoute>
               }
             />
@@ -150,12 +155,11 @@ function App() {
             />
 
             {/* نتائج الامتحان — أدمن ومدرس فقط */}
-            {/* مؤقتاً بيروح على ExamSettings لحد ما تتعمل صفحة Results */}
             <Route
               path="/exams/:id/results"
               element={
                 <ProtectedRoute allowedRoles={['admin', 'teacher']}>
-                  <ExamSettings />
+                  <ExamResults />
                 </ProtectedRoute>
               }
             />
@@ -175,7 +179,7 @@ function App() {
               path="/exams/:id/student"
               element={
                 <ProtectedRoute allowedRoles={['student']}>
-                  <TakeExam />
+                  <StudentExam />
                 </ProtectedRoute>
               }
             />

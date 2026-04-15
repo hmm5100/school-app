@@ -5,12 +5,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-  apiKey:            "AIzaSyCjPeZ09Dv8q9asALk71bzeAeSiYUXPvZA",
-  authDomain:        "school-exams-app.firebaseapp.com",
-  projectId:         "school-exams-app",
-  storageBucket:     "school-exams-app.firebasestorage.app",
-  messagingSenderId: "559973195647",
-  appId:             "1:559973195647:web:f15e289f5e770ad72ac44a",
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);

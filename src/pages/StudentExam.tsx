@@ -1,6 +1,9 @@
 // src/pages/StudentExam.tsx
-// صفحة الطالب لأداء الامتحان — Placeholder حتى اكتمال المرحلة القادمة
-import Placeholder from './Placeholder';
+// يوجه لـ TakeExam لأنها الصفحة الفعلية لأداء الامتحان
+import { useParams, Navigate } from 'react-router-dom';
+
 export default function StudentExam() {
-  return <Placeholder title="امتحان الطالب" description="واجهة الطالب لأداء الامتحان الإلكتروني." phase="المرحلة 5" />;
+  const { id } = useParams<{ id: string }>();
+  if (!id) return <Navigate to="/exams" replace />;
+  return <Navigate to={`/exams/${id}/take`} replace />;
 }

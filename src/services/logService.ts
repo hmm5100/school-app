@@ -1,3 +1,23 @@
+// src/services/logService.ts
+// ✅ مكتوب على Firestore بدل localStorage
+
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  limit,
+  serverTimestamp,
+  doc,
+  setDoc,
+  deleteDoc,
+  getDoc,
+  Timestamp,
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+
 export interface ActivityLog {
   id: string;
   userId: string;
@@ -22,26 +42,39 @@ export interface ActiveUser {
   ipAddress?: string;
 }
 
-const LOGS_STORAGE_KEY = 'activity_logs';
-const ACTIVE_USERS_KEY = 'active_users';
 const ACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
+// ─── Helper: Firestore doc → ActivityLog ───────────────────
+function docToLog(id: string, data: Record<string, unknown>): ActivityLog {
+  return {
+    ...(data as Omit<ActivityLog, 'id' | 'timestamp'>),
+    id,
+    timestamp:
+      data.timestamp instanceof Timestamp
+        ? data.timestamp.toDate()
+        : new Date(data.timestamp as string),
+  };
+}
 
 // ==================== Activity Logs ====================
 
-// Get all logs
-export const getAllLogs = (): ActivityLog[] => {
-  const stored = localStorage.getItem(LOGS_STORAGE_KEY);
-  if (!stored) return [];
-  
-  const logs = JSON.parse(stored);
-  return logs.map((log: any) => ({
-    ...log,
-    timestamp: new Date(log.timestamp)
-  }));
+// Get all logs (latest 500)
+export const getAllLogs = async (): Promise<ActivityLog[]> => {
+  try {
+    const q = query(
+      collection(db, 'activityLogs'),
+      orderBy('timestamp', 'desc'),
+      limit(500)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => docToLog(d.id, d.data() as Record<string, unknown>));
+  } catch {
+    return [];
+  }
 };
 
 // Get logs with filters
-export const getFilteredLogs = (filters: {
+export const getFilteredLogs = async (filters: {
   userId?: string;
   userRole?: string;
   actionType?: string;
@@ -49,189 +82,111 @@ export const getFilteredLogs = (filters: {
   startDate?: Date;
   endDate?: Date;
   search?: string;
-}): ActivityLog[] => {
-  let logs = getAllLogs();
-  
-  if (filters.userId) {
-    logs = logs.filter(log => log.userId === filters.userId);
+}): Promise<ActivityLog[]> => {
+  try {
+    // Build constraints array
+    const constraints: Parameters<typeof query>[1][] = [
+      orderBy('timestamp', 'desc'),
+      limit(500),
+    ];
+    if (filters.userId)     constraints.push(where('userId',     '==', filters.userId));
+    if (filters.userRole)   constraints.push(where('userRole',   '==', filters.userRole));
+    if (filters.actionType) constraints.push(where('actionType', '==', filters.actionType));
+    if (filters.targetType) constraints.push(where('targetType', '==', filters.targetType));
+
+    const q = query(collection(db, 'activityLogs'), ...constraints);
+    const snap = await getDocs(q);
+    let logs = snap.docs.map(d => docToLog(d.id, d.data() as Record<string, unknown>));
+
+    // Client-side: date range & text search
+    if (filters.startDate) logs = logs.filter(l => l.timestamp >= filters.startDate!);
+    if (filters.endDate)   logs = logs.filter(l => l.timestamp <= filters.endDate!);
+    if (filters.search) {
+      const s = filters.search.toLowerCase();
+      logs = logs.filter(l =>
+        l.action.toLowerCase().includes(s) ||
+        l.userName.toLowerCase().includes(s) ||
+        l.targetName?.toLowerCase().includes(s) ||
+        l.details?.toLowerCase().includes(s)
+      );
+    }
+
+    return logs;
+  } catch {
+    return [];
   }
-  
-  if (filters.userRole) {
-    logs = logs.filter(log => log.userRole === filters.userRole);
-  }
-  
-  if (filters.actionType) {
-    logs = logs.filter(log => log.actionType === filters.actionType);
-  }
-  
-  if (filters.targetType) {
-    logs = logs.filter(log => log.targetType === filters.targetType);
-  }
-  
-  if (filters.startDate) {
-    logs = logs.filter(log => log.timestamp >= filters.startDate!);
-  }
-  
-  if (filters.endDate) {
-    logs = logs.filter(log => log.timestamp <= filters.endDate!);
-  }
-  
-  if (filters.search) {
-    const search = filters.search.toLowerCase();
-    logs = logs.filter(log => 
-      log.action.toLowerCase().includes(search) ||
-      log.userName.toLowerCase().includes(search) ||
-      log.targetName?.toLowerCase().includes(search) ||
-      log.details?.toLowerCase().includes(search)
-    );
-  }
-  
-  return logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 };
 
-// Add a log entry
-export const addLog = (log: Omit<ActivityLog, 'id' | 'timestamp'>): ActivityLog => {
-  const all = getAllLogs();
-  
-  const newLog: ActivityLog = {
+// Add a log entry — fire-and-forget (never crashes the app)
+export const addLog = (log: Omit<ActivityLog, 'id' | 'timestamp'>): void => {
+  addDoc(collection(db, 'activityLogs'), {
     ...log,
-    id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    timestamp: new Date()
-  };
-  
-  all.push(newLog);
-  
-  // Keep only last 10000 logs to prevent storage overflow
-  if (all.length > 10000) {
-    all.splice(0, all.length - 10000);
-  }
-  
-  localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(all));
-  
-  return newLog;
+    timestamp: serverTimestamp(),
+  }).catch(() => { /* silent fail */ });
 };
 
-// Log user login
-export const logLogin = (userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student'): void => {
-  addLog({
-    userId,
-    userName,
-    userRole,
-    action: 'تسجيل الدخول',
-    actionType: 'login',
-    details: `قام ${userName} بتسجيل الدخول إلى النظام`
-  });
-};
+// ─── Convenience wrappers ───────────────────────────────────
 
-// Log user logout
-export const logLogout = (userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student'): void => {
-  addLog({
-    userId,
-    userName,
-    userRole,
-    action: 'تسجيل الخروج',
-    actionType: 'logout',
-    details: `قام ${userName} بتسجيل الخروج من النظام`
-  });
-};
+export const logLogin = (
+  userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student'
+): void => addLog({
+  userId, userName, userRole,
+  action: 'تسجيل الدخول', actionType: 'login',
+  details: `قام ${userName} بتسجيل الدخول إلى النظام`,
+});
 
-// Log creating an item
+export const logLogout = (
+  userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student'
+): void => addLog({
+  userId, userName, userRole,
+  action: 'تسجيل الخروج', actionType: 'logout',
+  details: `قام ${userName} بتسجيل الخروج من النظام`,
+});
+
 export const logCreate = (
-  userId: string,
-  userName: string,
-  userRole: 'admin' | 'teacher' | 'student',
-  targetType: ActivityLog['targetType'],
-  targetName: string,
-  targetId?: string
-): void => {
-  addLog({
-    userId,
-    userName,
-    userRole,
-    action: `إنشاء ${targetType}`,
-    actionType: 'create',
-    targetType,
-    targetId,
-    targetName,
-    details: `قام ${userName} بإنشاء ${targetType}: ${targetName}`
-  });
-};
+  userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student',
+  targetType: ActivityLog['targetType'], targetName: string, targetId?: string
+): void => addLog({
+  userId, userName, userRole,
+  action: `إنشاء ${targetType}`, actionType: 'create',
+  targetType, targetId, targetName,
+  details: `قام ${userName} بإنشاء ${targetType}: ${targetName}`,
+});
 
-// Log updating an item
 export const logUpdate = (
-  userId: string,
-  userName: string,
-  userRole: 'admin' | 'teacher' | 'student',
-  targetType: ActivityLog['targetType'],
-  targetName: string,
-  changes: string,
-  targetId?: string
-): void => {
-  addLog({
-    userId,
-    userName,
-    userRole,
-    action: `تعديل ${targetType}`,
-    actionType: 'update',
-    targetType,
-    targetId,
-    targetName,
-    details: `قام ${userName} بتعديل ${targetType}: ${targetName}. التغييرات: ${changes}`
-  });
-};
+  userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student',
+  targetType: ActivityLog['targetType'], targetName: string, changes: string, targetId?: string
+): void => addLog({
+  userId, userName, userRole,
+  action: `تعديل ${targetType}`, actionType: 'update',
+  targetType, targetId, targetName,
+  details: `قام ${userName} بتعديل ${targetType}: ${targetName}. التغييرات: ${changes}`,
+});
 
-// Log deleting an item
 export const logDelete = (
-  userId: string,
-  userName: string,
-  userRole: 'admin' | 'teacher' | 'student',
-  targetType: ActivityLog['targetType'],
-  targetName: string,
-  targetId?: string
-): void => {
-  addLog({
-    userId,
-    userName,
-    userRole,
-    action: `حذف ${targetType}`,
-    actionType: 'delete',
-    targetType,
-    targetId,
-    targetName,
-    details: `قام ${userName} بحذف ${targetType}: ${targetName}`
-  });
-};
+  userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student',
+  targetType: ActivityLog['targetType'], targetName: string, targetId?: string
+): void => addLog({
+  userId, userName, userRole,
+  action: `حذف ${targetType}`, actionType: 'delete',
+  targetType, targetId, targetName,
+  details: `قام ${userName} بحذف ${targetType}: ${targetName}`,
+});
 
-// Log exporting data
 export const logExport = (
-  userId: string,
-  userName: string,
-  userRole: 'admin' | 'teacher' | 'student',
-  exportType: string,
-  details: string
-): void => {
-  addLog({
-    userId,
-    userName,
-    userRole,
-    action: `تصدير ${exportType}`,
-    actionType: 'export',
-    details: `قام ${userName} بتصدير ${exportType}: ${details}`
-  });
-};
-
-// Clear old logs (older than specified days)
-export const clearOldLogs = (daysToKeep: number = 90): void => {
-  const all = getAllLogs();
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-  
-  const filtered = all.filter(log => log.timestamp >= cutoffDate);
-  localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(filtered));
-};
+  userId: string, userName: string, userRole: 'admin' | 'teacher' | 'student',
+  exportType: string, details: string
+): void => addLog({
+  userId, userName, userRole,
+  action: `تصدير ${exportType}`, actionType: 'export',
+  details: `قام ${userName} بتصدير ${exportType}: ${details}`,
+});
 
 // Get activity statistics
-export const getActivityStats = (startDate?: Date, endDate?: Date): {
+export const getActivityStats = async (
+  startDate?: Date,
+  endDate?: Date
+): Promise<{
   totalLogs: number;
   loginCount: number;
   createCount: number;
@@ -239,109 +194,91 @@ export const getActivityStats = (startDate?: Date, endDate?: Date): {
   deleteCount: number;
   byUser: { [userId: string]: number };
   byAction: { [action: string]: number };
-} => {
-  const logs = getFilteredLogs({ startDate, endDate });
-  
+}> => {
+  const logs = await getFilteredLogs({ startDate, endDate });
   const stats = {
     totalLogs: logs.length,
-    loginCount: 0,
-    createCount: 0,
-    updateCount: 0,
-    deleteCount: 0,
-    byUser: {} as { [userId: string]: number },
-    byAction: {} as { [action: string]: number }
+    loginCount: 0, createCount: 0, updateCount: 0, deleteCount: 0,
+    byUser: {} as { [k: string]: number },
+    byAction: {} as { [k: string]: number },
   };
-  
-  logs.forEach(log => {
-    if (log.actionType === 'login') stats.loginCount++;
-    if (log.actionType === 'create') stats.createCount++;
-    if (log.actionType === 'update') stats.updateCount++;
-    if (log.actionType === 'delete') stats.deleteCount++;
-    
-    stats.byUser[log.userId] = (stats.byUser[log.userId] || 0) + 1;
-    stats.byAction[log.actionType] = (stats.byAction[log.actionType] || 0) + 1;
+  logs.forEach(l => {
+    if (l.actionType === 'login')  stats.loginCount++;
+    if (l.actionType === 'create') stats.createCount++;
+    if (l.actionType === 'update') stats.updateCount++;
+    if (l.actionType === 'delete') stats.deleteCount++;
+    stats.byUser[l.userId]      = (stats.byUser[l.userId]      || 0) + 1;
+    stats.byAction[l.actionType] = (stats.byAction[l.actionType] || 0) + 1;
   });
-  
   return stats;
 };
 
 // ==================== Active Users Tracking ====================
+// ✅ Firestore collection "activeSessions" — doc ID = userId
 
-// Get all active users
-export const getActiveUsers = (): ActiveUser[] => {
-  const stored = localStorage.getItem(ACTIVE_USERS_KEY);
-  if (!stored) return [];
-  
-  const users = JSON.parse(stored);
-  const now = new Date();
-  
-  // Filter out inactive users (no activity in last 5 minutes)
-  const active = users
-    .map((u: any) => ({
-      ...u,
-      lastActivity: new Date(u.lastActivity)
-    }))
-    .filter((u: ActiveUser) => 
-      now.getTime() - u.lastActivity.getTime() < ACTIVITY_TIMEOUT
-    );
-  
-  localStorage.setItem(ACTIVE_USERS_KEY, JSON.stringify(active));
-  return active;
-};
-
-// Update user activity
-export const updateUserActivity = (
-  userId: string,
-  userName: string,
-  userRole: 'admin' | 'teacher' | 'student',
-  currentPage?: string
-): void => {
-  const active = getActiveUsers();
-  const existingIndex = active.findIndex(u => u.userId === userId);
-  
-  const userActivity: ActiveUser = {
-    userId,
-    userName,
-    userRole,
-    lastActivity: new Date(),
-    currentPage
-  };
-  
-  if (existingIndex >= 0) {
-    active[existingIndex] = userActivity;
-  } else {
-    active.push(userActivity);
+// Get all active users (online in last 5 min)
+export const getActiveUsers = async (): Promise<ActiveUser[]> => {
+  try {
+    const snap = await getDocs(collection(db, 'activeSessions'));
+    const now = Date.now();
+    return snap.docs
+      .map(d => {
+        const data = d.data();
+        const lastActivity =
+          data.lastActivity instanceof Timestamp
+            ? data.lastActivity.toDate()
+            : new Date(data.lastActivity);
+        return { userId: d.id, userName: data.userName, userRole: data.userRole,
+                 lastActivity, currentPage: data.currentPage } as ActiveUser;
+      })
+      .filter(u => now - u.lastActivity.getTime() < ACTIVITY_TIMEOUT);
+  } catch {
+    return [];
   }
-  
-  localStorage.setItem(ACTIVE_USERS_KEY, JSON.stringify(active));
 };
 
-// Remove user from active list (on logout)
+// Update user activity — upsert by userId
+export const updateUserActivity = (
+  userId: string, userName: string,
+  userRole: 'admin' | 'teacher' | 'student', currentPage?: string
+): void => {
+  setDoc(doc(db, 'activeSessions', userId), {
+    userName, userRole,
+    lastActivity: serverTimestamp(),
+    currentPage: currentPage || '',
+  }).catch(() => { /* silent fail */ });
+};
+
+// Remove user session on logout
 export const removeActiveUser = (userId: string): void => {
-  const active = getActiveUsers();
-  const filtered = active.filter(u => u.userId !== userId);
-  localStorage.setItem(ACTIVE_USERS_KEY, JSON.stringify(filtered));
+  deleteDoc(doc(db, 'activeSessions', userId)).catch(() => { /* silent fail */ });
 };
 
-// Check if user is online
-export const isUserOnline = (userId: string): boolean => {
-  const active = getActiveUsers();
-  return active.some(u => u.userId === userId);
+// Check if a specific user is online
+export const isUserOnline = async (userId: string): Promise<boolean> => {
+  try {
+    const snap = await getDoc(doc(db, 'activeSessions', userId));
+    if (!snap.exists()) return false;
+    const data = snap.data();
+    const lastActivity =
+      data.lastActivity instanceof Timestamp
+        ? data.lastActivity.toDate()
+        : new Date(data.lastActivity);
+    return Date.now() - lastActivity.getTime() < ACTIVITY_TIMEOUT;
+  } catch {
+    return false;
+  }
 };
 
-// Get count of active users by role
-export const getActiveUsersByRole = (): {
-  admin: number;
-  teacher: number;
-  student: number;
-  total: number;
-} => {
-  const active = getActiveUsers();
-  
+// Get active users grouped by role
+export const getActiveUsersByRole = async (): Promise<{
+  admin: number; teacher: number; student: number; total: number;
+}> => {
+  const active = await getActiveUsers();
   return {
-    admin: active.filter(u => u.userRole === 'admin').length,
+    admin:   active.filter(u => u.userRole === 'admin').length,
     teacher: active.filter(u => u.userRole === 'teacher').length,
     student: active.filter(u => u.userRole === 'student').length,
-    total: active.length
+    total:   active.length,
   };
 };

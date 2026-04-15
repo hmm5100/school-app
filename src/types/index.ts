@@ -21,7 +21,9 @@ export interface Student {
   classId: string;
   className: string;
   number: number;
-  nationalId?: string;       // 14-digit national ID
+  nationalId?: string;        // 14-digit national ID
+  birthDate?: string;         // DD/MM/YYYY — used for student login
+  normalizedName?: string;    // normalized Arabic name for search
   allowedSubjects?: string[]; // subjects this student can access
   email?: string;
   phone?: string;

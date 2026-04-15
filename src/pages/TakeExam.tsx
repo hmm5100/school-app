@@ -460,9 +460,18 @@ export default function TakeExam() {
             <div style={{ padding: '16px 24px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>السؤال {currentIdx + 1}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 99, background: currentQ.type === 'multiple_choice' ? '#dbeafe' : '#d1fae5', color: currentQ.type === 'multiple_choice' ? '#1d4ed8' : '#065f46' }}>
-                  {currentQ.type === 'multiple_choice' ? 'اختيار من متعدد' : 'صح / خطأ'}
-                </span>
+                {(() => {
+                  const typeMap: Record<string, { label: string; bg: string; color: string }> = {
+                    multiple_choice: { label: 'اختيار من متعدد', bg: '#dbeafe', color: '#1d4ed8' },
+                    true_false:      { label: 'صح / خطأ',        bg: '#d1fae5', color: '#065f46' },
+                    fill_blank:      { label: 'أكمل الفراغ',     bg: '#fef3c7', color: '#b45309' },
+                    compare:         { label: 'مقارنة',           bg: '#ede9fe', color: '#6d28d9' },
+                    short_answer:    { label: 'إجابة قصيرة',     bg: '#fce7f3', color: '#be185d' },
+                    essay:           { label: 'مقال',             bg: '#f3f4f6', color: '#374151' },
+                  };
+                  const t = typeMap[currentQ.type] || { label: currentQ.type, bg: '#f3f4f6', color: '#374151' };
+                  return <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 99, background: t.bg, color: t.color, fontWeight: 600 }}>{t.label}</span>;
+                })()}
                 <span style={{ fontSize: 12, color: '#9ca3af' }}>{currentQ.score} درجة</span>
               </div>
             </div>
@@ -474,33 +483,93 @@ export default function TakeExam() {
               )}
               <p style={{ fontSize: 15, color: '#111827', lineHeight: 1.8, marginBottom: 24, fontWeight: 600 }}>{currentQ.text}</p>
 
-              {/* Options */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {(currentQ.options || []).map((opt, optIdx) => {
-                  const isSelected = answers[currentQ.id] === opt;
-                  const letters = ['أ', 'ب', 'ج', 'د', 'هـ', 'و'];
-                  return (
-                    <button
-                      key={optIdx}
-                      onClick={() => handleAnswer(currentQ.id, opt)}
-                      style={{
-                        width: '100%', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '14px 16px', borderRadius: 14,
-                        border: `2px solid ${isSelected ? '#4f46e5' : '#e5e7eb'}`,
-                        background: isSelected ? '#eef2ff' : '#fff',
-                        color: isSelected ? '#3730a3' : '#374151',
-                        cursor: 'pointer', transition: 'all 0.15s',
-                      }}
-                    >
-                      <span style={{ width: 32, height: 32, borderRadius: 8, fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: isSelected ? '#4f46e5' : '#f3f4f6', color: isSelected ? '#fff' : '#6b7280', transition: 'all 0.15s' }}>
-                        {letters[optIdx] || optIdx + 1}
-                      </span>
-                      <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{opt}</span>
-                      {isSelected && <CheckCircle2 size={18} color="#4f46e5" />}
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Options / Answer Input — حسب نوع السؤال */}
+              {(currentQ.type === 'multiple_choice') && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {(currentQ.options || []).map((opt, optIdx) => {
+                    const isSelected = answers[currentQ.id] === opt;
+                    const letters = ['أ', 'ب', 'ج', 'د', 'هـ', 'و'];
+                    return (
+                      <button
+                        key={optIdx}
+                        onClick={() => handleAnswer(currentQ.id, opt)}
+                        style={{
+                          width: '100%', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 12,
+                          padding: '14px 16px', borderRadius: 14,
+                          border: `2px solid ${isSelected ? '#4f46e5' : '#e5e7eb'}`,
+                          background: isSelected ? '#eef2ff' : '#fff',
+                          color: isSelected ? '#3730a3' : '#374151',
+                          cursor: 'pointer', transition: 'all 0.15s',
+                        }}
+                      >
+                        <span style={{ width: 32, height: 32, borderRadius: 8, fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: isSelected ? '#4f46e5' : '#f3f4f6', color: isSelected ? '#fff' : '#6b7280', transition: 'all 0.15s' }}>
+                          {letters[optIdx] || optIdx + 1}
+                        </span>
+                        <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{opt}</span>
+                        {isSelected && <CheckCircle2 size={18} color="#4f46e5" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {currentQ.type === 'true_false' && (
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {['صح', 'خطأ'].map(opt => {
+                    const isSelected = answers[currentQ.id] === opt;
+                    return (
+                      <button
+                        key={opt}
+                        onClick={() => handleAnswer(currentQ.id, opt)}
+                        style={{
+                          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          padding: '14px 0', borderRadius: 14, fontWeight: 700, fontSize: 15, cursor: 'pointer',
+                          border: `2px solid ${isSelected ? (opt === 'صح' ? '#059669' : '#dc2626') : '#e5e7eb'}`,
+                          background: isSelected ? (opt === 'صح' ? '#d1fae5' : '#fee2e2') : '#fff',
+                          color: isSelected ? (opt === 'صح' ? '#065f46' : '#991b1b') : '#374151',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <span style={{ fontSize: 20 }}>{opt === 'صح' ? '✓' : '✗'}</span> {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {(currentQ.type === 'fill_blank' || currentQ.type === 'short_answer' || currentQ.type === 'compare' || currentQ.type === 'essay') && (
+                <div>
+                  {currentQ.type === 'compare' && currentQ.options && currentQ.options.length >= 2 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                      {currentQ.options.slice(0, 2).map((opt, i) => (
+                        <div key={i} style={{ padding: '8px 12px', background: '#f5f3ff', borderRadius: 10, textAlign: 'center', fontSize: 13, fontWeight: 700, color: '#6d28d9' }}>{opt}</div>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    value={answers[currentQ.id] || ''}
+                    onChange={e => handleAnswer(currentQ.id, e.target.value)}
+                    placeholder={
+                      currentQ.type === 'fill_blank' ? 'أكمل الفراغ هنا...' :
+                      currentQ.type === 'compare' ? 'اكتب المقارنة هنا...' :
+                      currentQ.type === 'essay' ? 'اكتب إجابتك المفصلة هنا...' :
+                      'اكتب إجابتك القصيرة هنا...'
+                    }
+                    style={{
+                      width: '100%',
+                      minHeight: currentQ.type === 'essay' ? 140 : currentQ.type === 'compare' ? 110 : 80,
+                      padding: '12px 14px',
+                      border: `2px solid ${answers[currentQ.id] ? '#4f46e5' : '#e5e7eb'}`,
+                      borderRadius: 12, fontSize: 14, fontFamily: 'Cairo, sans-serif',
+                      color: '#111827', background: answers[currentQ.id] ? '#eef2ff' : '#fff',
+                      outline: 'none', resize: 'vertical', boxSizing: 'border-box', direction: 'rtl',
+                    }}
+                  />
+                  {answers[currentQ.id] && (
+                    <p style={{ fontSize: 12, color: '#6b7280', marginTop: 6, textAlign: 'left' }}>✓ تم كتابة الإجابة</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
