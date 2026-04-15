@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── دالة مساعدة: هل المستخدم مسجل الدخول؟ ───
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // ─── دالة مساعدة: دور المستخدم ───
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // ─── دالة مساعدة: هل هو مدير؟ ───
+    function isAdmin() {
+      return isAuthenticated() && userRole() == 'admin';
+    }
+
+    // ─── دالة مساعدة: هل هو مدرس أو مدير؟ ───
+    function isTeacherOrAdmin() {
+      return isAuthenticated() && (userRole() == 'teacher' || userRole() == 'admin');
+    }
+
+    // ─── جدول المستخدمين ───
+    match /users/{userId} {
+      allow read:   if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAdmin() || request.auth.uid == userId;
+      allow delete: if isAdmin();
+    }
+
+    // ─── جدول الطلاب ───
+    match /students/{studentId} {
+      allow read:   if isTeacherOrAdmin();
+      allow create: if isTeacherOrAdmin();
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── جدول المدرسين ───
+    match /teachers/{teacherId} {
+      allow read:   if isTeacherOrAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == teacherId);
+      allow delete: if isAdmin();
+    }
+
+    // ─── جدول الفصول ───
+    match /classes/{classId} {
+      allow read:   if isAuthenticated();
+      allow write:  if isTeacherOrAdmin();
+    }
+
+    // ─── جدول المواد ───
+    match /subjects/{subjectId} {
+      allow read:   if isAuthenticated();
+      allow write:  if isTeacherOrAdmin();
+    }
+
+    // ─── جدول الامتحانات ───
+    match /exams/{examId} {
+      allow read:   if isAuthenticated();
+      allow create: if isTeacherOrAdmin();
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── إجابات الطلاب على الامتحانات ───
+    match /studentAnswers/{answerId} {
+      allow read:   if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // ─── الدرجات ───
+    match /grades/{gradeId} {
+      allow read:   if isAuthenticated();
+      allow create: if isTeacherOrAdmin();
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── الإشعارات ───
+    match /notifications/{notifId} {
+      allow read:   if isAuthenticated();
+      allow create: if isTeacherOrAdmin();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // ─── لوحة الشرف ───
+    match /honorRoll/{entryId} {
+      allow read:   if isAuthenticated();
+      allow write:  if isTeacherOrAdmin();
+    }
+
+    // ─── الشهادات ───
+    match /certificates/{certId} {
+      allow read:   if isAuthenticated();
+      allow create: if isTeacherOrAdmin();
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── الرسائل ───
+    match /messages/{msgId} {
+      allow read:   if isTeacherOrAdmin();
+      allow create: if isTeacherOrAdmin();
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── سجلات التدقيق ───
+    match /auditLogs/{logId} {
+      allow read:   if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ─── الجلسات النشطة ───
+    match /activeSessions/{sessionId} {
+      allow read:   if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && request.auth.uid == sessionId;
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == sessionId);
+    }
+
+    // ─── إعدادات النظام ───
+    match /settings/{settingId} {
+      allow read:   if isAuthenticated();
+      allow write:  if isAdmin();
+    }
+  }
+}
