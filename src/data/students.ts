@@ -50,3 +50,22 @@ export const totalClasses  = 14;
 // البيانات اتنقلت لـ Firestore — استخدم:
 // import { studentService } from '@/services/studentService';
 // const students = await studentService.getStudentsByClass(className);
+
+// ⚠️ بيانات مؤقتة للتجربة فقط - استبدلها ببياناتك الحقيقية
+export const studentsData: StudentRecord[] = [
+  {
+    number: 1,
+    name: "أحمد محمد علي",
+    className: "1/1 بنين",
+    nationalId: "30501011234567",
+    birthDate: "01/01/2018"
+  },
+  {
+    number: 2,
+    name: "فاطمة حسن محمود",
+    className: "1/1 فتيات",
+    nationalId: "30501021234568",
+    birthDate: "15/02/2018"
+  },
+  // أضف باقي الطلاب هنا...
+];

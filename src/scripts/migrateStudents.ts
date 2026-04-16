@@ -5,7 +5,7 @@
 
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { studentsData } from '../src/data/students';
+import { studentsData } from '../data/students';
 
 // حط مسار الـ service account key بتاعك هنا
 // حمّله من Firebase Console > Project Settings > Service Accounts

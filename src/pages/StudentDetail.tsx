@@ -199,7 +199,7 @@ export default function StudentDetail() {
       {/* Info Card */}
       <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #e5e7eb', boxShadow: '0 2px 10px rgba(0,0,0,0.04)', padding: '8px 20px', marginBottom: 16 }}>
         <InfoRow icon={<User size={15} color="#6b7280" />} label="الاسم الكامل" value={cur.name} editing={editing} onChange={set('name')} />
-        <InfoRow icon={<Hash size={15} color="#6b7280" />} label="رقم الطالب" value={cur.number} editing={editing} onChange={set('number')} />
+        <InfoRow icon={<Hash size={15} color="#6b7280" />} label="رقم الطالب" value={cur.number != null ? String(cur.number) : undefined} editing={editing} onChange={set('number')} />
         <InfoRow icon={<IdCard size={15} color="#6b7280" />} label="الرقم القومي" value={cur.nationalId} editing={editing} onChange={set('nationalId')} />
         <InfoRow icon={<Calendar size={15} color="#6b7280" />} label="تاريخ الميلاد" value={cur.birthDate} editing={editing} onChange={set('birthDate')} type="date" />
         <InfoRow icon={<BookOpen size={15} color="#6b7280" />} label="الفصل" value={cur.className} editing={editing} onChange={set('className')} />

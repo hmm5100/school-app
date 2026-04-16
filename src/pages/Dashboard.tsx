@@ -18,67 +18,13 @@ import {
   Clock,
   AlertTriangle,
 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { studentsData } from '../data/students';
-import { normalizeArabic } from '../utils/normalizeArabic';
 
 const Dashboard = () => {
   const { userProfile } = useAuth();
   const navigate = useNavigate();
 
-  // رفع بيانات الطلاب أوتوماتيك لو مش موجودة في Firebase
-  useEffect(() => {
-    if (userProfile?.role !== 'admin') return;
-
-    const autoUpload = async () => {
-      try {
-        // اتحقق الأول لو في طلاب عندهم nationalId
-        const snap = await getDocs(collection(db, 'students'));
-        const hasNationalId = snap.docs.some(d => d.data().nationalId);
-        if (hasNationalId) return; // البيانات موجودة خلاص
-
-        // لو مفيش — ارفع الكل
-        const BATCH = 400;
-        for (let i = 0; i < studentsData.length; i += BATCH) {
-          const chunk = studentsData.slice(i, i + BATCH);
-          const batch = writeBatch(db);
-
-          // بنّي map للموجودين
-          const existingMap = new Map<string, string>();
-          snap.docs.forEach(d => {
-            const key = normalizeArabic(d.data().name || '') + '||' + (d.data().className || '');
-            existingMap.set(key, d.id);
-          });
-
-          for (const student of chunk) {
-            const normName = normalizeArabic(student.name);
-            const key = normName + '||' + student.className;
-            const existingId = existingMap.get(key);
-            const payload = {
-              number: student.number,
-              name: student.name,
-              className: student.className,
-              classId: student.className.replace(/\s/g, '_'),
-              nationalId: student.nationalId,
-              birthDate: student.birthDate,
-              normalizedName: normName,
-            };
-            if (existingId) {
-              batch.set(doc(db, 'students', existingId), payload, { merge: true });
-            } else {
-              batch.set(doc(collection(db, 'students')), payload);
-            }
-          }
-          await batch.commit();
-        }
-      } catch {
-        // فشل الرفع — مش مشكلة، هيحاول تاني المرة الجاية
-      }
-    };
-
-    autoUpload();
-  }, [userProfile]);
   const [selectedGender, setSelectedGender] = useState<'all' | 'بنين' | 'فتيات'>('all');
 
   const greeting = () => {

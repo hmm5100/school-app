@@ -17,7 +17,6 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { User, UserRole, Student, Teacher } from '../types';
-import { studentsData } from '../data/students';
 import { normalizeArabic } from '../utils/normalizeArabic';
 
 // ─────────────────────────────────────────────
@@ -168,37 +167,11 @@ export const loginStudent = async (
     )) throw err;
   }
 
-  // ── 2. Fallback: local studentsData ───────────────────────
-  const localMatch = studentsData.find(s => {
-    // لو في اسم → تحقق منه
-    if (hasName && normalizeArabic(s.name) !== normInput) return false;
-
-    if (isNationalId) {
-      return s.nationalId === trimmedCred.replace(/[^\d]/g, '');
-    } else {
-      return s.birthDate ? birthDateMatch(trimmedCred, s.birthDate) : false;
-    }
-  });
-
-  if (!localMatch) {
-    throw new Error(
-      isNationalId
-        ? 'لم يتم العثور على الطالب. تحقق من الرقم القومي.'
-        : 'لم يتم العثور على الطالب. تحقق من تاريخ الميلاد.'
-    );
-  }
-
-  const student: Student = {
-    id: String(localMatch.number),
-    name: localMatch.name,
-    classId: localMatch.className.replace(/\s/g, '_'),
-    className: localMatch.className,
-    number: localMatch.number,
-    nationalId: localMatch.nationalId,
-    createdAt: new Date(),
-  };
-
-  return { student, allowedSubjects: [] };
+  throw new Error(
+    isNationalId
+      ? 'لم يتم العثور على الطالب. تحقق من الرقم القومي.'
+      : 'لم يتم العثور على الطالب. تحقق من تاريخ الميلاد.'
+  );
 };
 
 // ─────────────────────────────────────────────

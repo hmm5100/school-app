@@ -31,8 +31,10 @@ service cloud.firestore {
     }
 
     // ─── جدول الطلاب ───
+    // ✅ الطالب يقدر يقرأ بياناته الشخصية بس (عن طريق studentId)
+    // المدرس والأدمن يقدروا يقروا كل الطلاب
     match /students/{studentId} {
-      allow read:   if isTeacherOrAdmin();
+      allow read:   if isTeacherOrAdmin() || (isAuthenticated() && request.auth.uid == studentId);
       allow create: if isTeacherOrAdmin();
       allow update: if isTeacherOrAdmin();
       allow delete: if isAdmin();
@@ -67,10 +69,12 @@ service cloud.firestore {
     }
 
     // ─── إجابات الطلاب على الامتحانات ───
+    // ✅ الطالب يقدر يقرأ ويكتب إجاباته بس
+    // المدرس والأدمن يقدروا يقروا كل الإجابات
     match /studentAnswers/{answerId} {
-      allow read:   if isAuthenticated();
+      allow read:   if isTeacherOrAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow update: if isTeacherOrAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
       allow delete: if isAdmin();
     }
 

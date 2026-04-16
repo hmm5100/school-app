@@ -54,20 +54,20 @@ const Navbar = ({ onMenuToggle }: NavbarProps) => {
     return () => clearInterval(interval);
   }, [userId, role]);
 
-  const loadCounts = () => {
+  const loadCounts = async () => {
     if (!userId || !role) return;
     
-    const notifCount = getNotificationUnreadCount(userId, role);
-    const msgCount = getChatUnreadCount(userId);
+    const notifCount = await getNotificationUnreadCount(userId, role);
+    const msgCount = await getChatUnreadCount(userId);
     
     setNotificationCount(notifCount);
     setChatCount(msgCount);
   };
 
-  const loadRecentNotifications = () => {
+  const loadRecentNotifications = async () => {
     if (!userId || !role) return;
     
-    const notifications = getUserNotifications(userId, role);
+    const notifications = await getUserNotifications(userId, role);
     setRecentNotifications(notifications.slice(0, 5));
   };
 

@@ -16,17 +16,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Student } from '../types';
-import { studentsData } from '../data/students';
 
-// ── local in-memory store seeded from static data ──
-let localStudents: Student[] = studentsData.map(s => ({
-  id: `local_${s.number}_${s.className.replace(/\s/g, '_')}`,
-  name: s.name,
-  classId: s.className.replace(/\s/g, '_'),
-  className: s.className,
-  number: s.number,
-  createdAt: new Date(),
-}));
+
+// ── local in-memory store (للعمليات المؤقتة فقط) ──
+let localStudents: Student[] = [];
 
 function isFirebaseConfigured(): boolean {
   try {
@@ -47,10 +40,10 @@ export const getAllStudents = async (): Promise<Student[]> => {
     const snap = await getDocs(
       query(collection(db, 'students'), orderBy('className', 'asc')),
     );
-    if (snap.empty) return [...localStudents];
+    if (snap.empty) return [];
     return snap.docs.map(d => ({ ...(d.data() as Student), id: d.id }));
   } catch {
-    return [...localStudents];
+    return [];
   }
 };
 
@@ -70,10 +63,10 @@ export const getStudentsByClass = async (classId: string): Promise<Student[]> =>
         orderBy('number', 'asc'),
       ),
     );
-    if (snap.empty) return localStudents.filter(s => s.classId === classId);
+    if (snap.empty) return [];
     return snap.docs.map(d => ({ ...(d.data() as Student), id: d.id }));
   } catch {
-    return localStudents.filter(s => s.classId === classId);
+    return [];
   }
 };
 

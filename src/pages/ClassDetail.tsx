@@ -61,7 +61,7 @@ export default function ClassDetail() {
     setFiltered(
       students.filter(s =>
         s.name?.toLowerCase().includes(q) ||
-        s.number?.includes(q) ||
+        String(s.number ?? '').includes(q) ||
         s.nationalId?.includes(q)
       )
     );
