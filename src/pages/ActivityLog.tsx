@@ -1,195 +1,455 @@
 // src/pages/ActivityLog.tsx
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
+import {
+  Activity, Clock, User, Edit, Trash2, Plus, CheckCircle,
+  XCircle, AlertTriangle, FileText, Filter, Calendar,
+  Search, Download, Eye,
+} from 'lucide-react';
+import { collection, getDocs, query, orderBy, limit, where, Timestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
-type ActionType = 'add' | 'edit' | 'delete' | 'suspend' | 'reopen' | 'upload';
-type EntityType = 'student' | 'teacher' | 'exam' | 'grade' | 'class' | 'subject' | 'certificate';
-
-interface ActivityLog {
-  id: string; userId: string; userName: string; userRole: 'admin' | 'teacher';
-  userAvatar: string; action: ActionType; entityType: EntityType; entityName: string;
-  oldValue?: string; newValue?: string; details: string; timestamp: Date;
-  ipAddress?: string; device?: string; severity: 'low' | 'medium' | 'high' | 'critical';
+// ─── Types ───────────────────────────────────
+interface AuditLog {
+  id: string;
+  action: 'create' | 'update' | 'delete' | 'approve' | 'reject' | 'other';
+  entity: 'exam' | 'student' | 'grade' | 'retake_request' | 'user' | 'other';
+  entityId: string;
+  entityName: string;
+  userId: string;
+  userName: string;
+  userRole: 'admin' | 'teacher' | 'student';
+  description: string;
+  timestamp: Date;
+  details?: Record<string, unknown>;
 }
 
-const mockLogs: ActivityLog[] = [
-  { id:'1', userId:'admin1', userName:'Mr. Hamdy Mohamed', userRole:'admin', userAvatar:'👨‍💼', action:'delete', entityType:'student', entityName:'أحمد محمد علي', details:'حذف طالب من الصف الأول الثانوي', timestamp:new Date(Date.now()-1000*60*15), ipAddress:'192.168.1.100', device:'Windows 11', severity:'high' },
-  { id:'2', userId:'teacher1', userName:'أ. سارة أحمد', userRole:'teacher', userAvatar:'👩‍🏫', action:'edit', entityType:'exam', entityName:'امتحان الرياضيات - الشهر الثاني', oldValue:'مدة الامتحان: 60 دقيقة', newValue:'مدة الامتحان: 90 دقيقة', details:'تعديل مدة امتحان الرياضيات', timestamp:new Date(Date.now()-1000*60*45), ipAddress:'192.168.1.105', device:'MacBook Pro', severity:'medium' },
-  { id:'3', userId:'teacher2', userName:'أ. محمد حسن', userRole:'teacher', userAvatar:'👨‍🏫', action:'upload', entityType:'grade', entityName:'درجات امتحان العلوم', details:'رفع ملف Excel يحتوي على 45 درجة', timestamp:new Date(Date.now()-1000*60*120), ipAddress:'192.168.1.108', device:'iPad Pro', severity:'low' },
-  { id:'4', userId:'admin1', userName:'Mr. Hamdy Mohamed', userRole:'admin', userAvatar:'👨‍💼', action:'add', entityType:'teacher', entityName:'أ. فاطمة علي', details:'إضافة مدرس جديد - مادة اللغة العربية', timestamp:new Date(Date.now()-1000*60*180), ipAddress:'192.168.1.100', device:'Windows 11', severity:'medium' },
-  { id:'5', userId:'teacher3', userName:'أ. نورا خالد', userRole:'teacher', userAvatar:'👩‍🏫', action:'reopen', entityType:'exam', entityName:'امتحان الإنجليزي - الشهر الأول', details:'إعادة فتح الامتحان للطالب: خالد محمود', timestamp:new Date(Date.now()-1000*60*240), ipAddress:'192.168.1.112', device:'iPhone 15', severity:'medium' },
-  { id:'6', userId:'admin1', userName:'Mr. Hamdy Mohamed', userRole:'admin', userAvatar:'👨‍💼', action:'suspend', entityType:'teacher', entityName:'أ. أحمد سعيد', oldValue:'الحالة: نشط', newValue:'الحالة: موقوف مؤقتًا', details:'إيقاف حساب المدرس مؤقتًا', timestamp:new Date(Date.now()-1000*60*360), ipAddress:'192.168.1.100', device:'Windows 11', severity:'critical' },
-  { id:'7', userId:'teacher1', userName:'أ. سارة أحمد', userRole:'teacher', userAvatar:'👩‍🏫', action:'add', entityType:'exam', entityName:'امتحان الجبر - نهاية الترم', details:'إنشاء امتحان جديد - 40 سؤال - 100 درجة', timestamp:new Date(Date.now()-1000*60*480), ipAddress:'192.168.1.105', device:'MacBook Pro', severity:'low' },
-  { id:'8', userId:'admin1', userName:'Mr. Hamdy Mohamed', userRole:'admin', userAvatar:'👨‍💼', action:'edit', entityType:'class', entityName:'الصف الأول الثانوي - أ', oldValue:'عدد الطلاب: 32', newValue:'عدد الطلاب: 34', details:'تعديل بيانات الفصل', timestamp:new Date(Date.now()-1000*60*600), ipAddress:'192.168.1.100', device:'Windows 11', severity:'low' },
-];
+const ActivityLog = () => {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterAction, setFilterAction] = useState<string>('all');
+  const [filterEntity, setFilterEntity] = useState<string>('all');
+  const [filterRole, setFilterRole] = useState<string>('all');
 
-const actionColors: Record<ActionType, { bg: string; color: string; label: string }> = {
-  add:     { bg: '#f0fdf4', color: '#15803d', label: 'إضافة' },
-  edit:    { bg: '#eff6ff', color: '#1d4ed8', label: 'تعديل' },
-  delete:  { bg: '#fef2f2', color: '#b91c1c', label: 'حذف' },
-  suspend: { bg: '#fff7ed', color: '#c2410c', label: 'إيقاف' },
-  reopen:  { bg: '#f0fdf4', color: '#15803d', label: 'إعادة فتح' },
-  upload:  { bg: '#faf5ff', color: '#6d28d9', label: 'رفع' },
-};
+  useEffect(() => {
+    const loadLogs = async () => {
+      try {
+        // جلب سجلات التعديلات من Firestore
+        const logsSnap = await getDocs(
+          query(
+            collection(db, 'auditLogs'),
+            orderBy('timestamp', 'desc'),
+            limit(200) // آخر 200 سجل
+          )
+        );
 
-const severityColors: Record<string, { bg: string; color: string; label: string; icon: string }> = {
-  low:      { bg: '#f0fdf4', color: '#15803d', label: 'منخفضة', icon: '🔵' },
-  medium:   { bg: '#fffbeb', color: '#92400e', label: 'متوسطة', icon: '🟡' },
-  high:     { bg: '#fff7ed', color: '#c2410c', label: 'عالية',  icon: '🟠' },
-  critical: { bg: '#fef2f2', color: '#b91c1c', label: 'حرجة',   icon: '🔴' },
-};
+        const logsData: AuditLog[] = logsSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            action: data.action || 'other',
+            entity: data.entity || 'other',
+            entityId: data.entityId || '',
+            entityName: data.entityName || 'غير محدد',
+            userId: data.userId || '',
+            userName: data.userName || 'مستخدم غير معروف',
+            userRole: data.userRole || 'student',
+            description: data.description || 'لا يوجد وصف',
+            timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(),
+            details: data.details,
+          };
+        });
 
-const entityLabels: Record<EntityType, string> = { student:'طالب', teacher:'مدرس', exam:'امتحان', grade:'درجات', class:'فصل', subject:'مادة', certificate:'شهادة' };
+        setLogs(logsData);
+        setFilteredLogs(logsData);
+      } catch (err) {
+        console.error('خطأ في تحميل سجلات التعديلات:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-function formatTime(d: Date) {
-  const diff = Math.floor((Date.now() - d.getTime()) / 60000);
-  if (diff < 60) return `منذ ${diff} دقيقة`;
-  if (diff < 1440) return `منذ ${Math.floor(diff/60)} ساعة`;
-  return `منذ ${Math.floor(diff/1440)} يوم`;
-}
+    loadLogs();
+  }, []);
 
-const ActivityLogPage: React.FC = () => {
-  const [logs] = useState<ActivityLog[]>(mockLogs);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterAction, setFilterAction] = useState<ActionType | 'all'>('all');
-  const [filterEntity, setFilterEntity] = useState<EntityType | 'all'>('all');
-  const [filterSeverity, setFilterSeverity] = useState<'all'|'low'|'medium'|'high'|'critical'>('all');
+  // ═══ Filter Logic ═══
+  useEffect(() => {
+    let result = [...logs];
 
-  const filtered = logs.filter(log => {
-    const matchSearch = log.details.includes(searchTerm) || log.entityName.includes(searchTerm) || log.userName.includes(searchTerm);
-    return matchSearch && (filterAction === 'all' || log.action === filterAction) && (filterEntity === 'all' || log.entityType === filterEntity) && (filterSeverity === 'all' || log.severity === filterSeverity);
-  });
+    // بحث
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(log =>
+        log.userName.toLowerCase().includes(q) ||
+        log.entityName.toLowerCase().includes(q) ||
+        log.description.toLowerCase().includes(q)
+      );
+    }
 
-  const sel = { width:'100%', padding:'9px 12px', border:'1px solid #e2e8f0', borderRadius:'10px', fontSize:'13px', fontFamily:'Cairo, sans-serif', outline:'none', color:'#1e293b', background:'white' } as React.CSSProperties;
+    // فلتر بالإجراء
+    if (filterAction !== 'all') {
+      result = result.filter(log => log.action === filterAction);
+    }
+
+    // فلتر بالكيان
+    if (filterEntity !== 'all') {
+      result = result.filter(log => log.entity === filterEntity);
+    }
+
+    // فلتر بالدور
+    if (filterRole !== 'all') {
+      result = result.filter(log => log.userRole === filterRole);
+    }
+
+    setFilteredLogs(result);
+  }, [logs, searchQuery, filterAction, filterEntity, filterRole]);
+
+  // ═══ Action Icon ═══
+  const getActionIcon = (action: string) => {
+    switch (action) {
+      case 'create': return <Plus size={16} color="#059669" />;
+      case 'update': return <Edit size={16} color="#2555a0" />;
+      case 'delete': return <Trash2 size={16} color="#ef4444" />;
+      case 'approve': return <CheckCircle size={16} color="#059669" />;
+      case 'reject': return <XCircle size={16} color="#ef4444" />;
+      default: return <Activity size={16} color="#64748b" />;
+    }
+  };
+
+  // ═══ Action Label ═══
+  const getActionLabel = (action: string) => {
+    switch (action) {
+      case 'create': return 'إنشاء';
+      case 'update': return 'تعديل';
+      case 'delete': return 'حذف';
+      case 'approve': return 'موافقة';
+      case 'reject': return 'رفض';
+      default: return 'آخر';
+    }
+  };
+
+  // ═══ Entity Label ═══
+  const getEntityLabel = (entity: string) => {
+    switch (entity) {
+      case 'exam': return 'امتحان';
+      case 'student': return 'طالب';
+      case 'grade': return 'درجة';
+      case 'retake_request': return 'طلب إعادة';
+      case 'user': return 'مستخدم';
+      default: return 'آخر';
+    }
+  };
+
+  // ═══ Time Ago ═══
+  const getTimeAgo = (date: Date): string => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return 'منذ لحظات';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `منذ ${minutes} دقيقة`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `منذ ${hours} ساعة`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `منذ ${days} يوم`;
+    return date.toLocaleDateString('ar-EG');
+  };
+
+  // ═══ Download CSV ═══
+  const downloadCSV = () => {
+    let csv = 'التاريخ,الوقت,المستخدم,الدور,الإجراء,الكيان,الاسم,الوصف\n';
+
+    filteredLogs.forEach(log => {
+      const date = log.timestamp.toLocaleDateString('ar-EG');
+      const time = log.timestamp.toLocaleTimeString('ar-EG');
+      csv += `${date},${time},${log.userName},${log.userRole},${getActionLabel(log.action)},${getEntityLabel(log.entity)},${log.entityName},"${log.description}"\n`;
+    });
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `سجل_التعديلات_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '60vh',
+        fontFamily: 'Cairo, sans-serif',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '4px solid #e2e8f0',
+            borderTop: '4px solid #2555a0',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px',
+          }} />
+          <p style={{ color: '#64748b', fontSize: '14px' }}>جاري تحميل السجلات...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ direction:'rtl', fontFamily:'Cairo, sans-serif', minHeight:'100%' }}>
+    <div style={{ fontFamily: 'Cairo, sans-serif', direction: 'rtl' }}>
       {/* Header */}
-      <div style={{ marginBottom:'24px' }}>
-        <h1 style={{ fontSize:'22px', fontWeight:'900', color:'#1e293b', margin:0 }}>📋 سجلات التعديلات</h1>
-        <p style={{ fontSize:'13px', color:'#64748b', margin:'4px 0 0' }}>متابعة كل العمليات والتعديلات داخل النظام</p>
-      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f2244', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <FileText size={28} />
+            سجلات التعديلات
+          </h1>
+          <p style={{ color: '#64748b', fontSize: '13px' }}>
+            سجل كامل لجميع العمليات التي تمت على النظام ({filteredLogs.length} من أصل {logs.length})
+          </p>
+        </div>
 
-      {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'12px', marginBottom:'20px' }}>
-        {[
-          { label:'إجمالي العمليات', value:logs.length, icon:'📊', bg:'#eff6ff', color:'#1d4ed8' },
-          { label:'عمليات اليوم', value:8, icon:'📅', bg:'#f0fdf4', color:'#15803d' },
-          { label:'آخر تعديل', value:'منذ 15 دقيقة', icon:'🕐', bg:'#fffbeb', color:'#92400e' },
-          { label:'عمليات حرجة', value:logs.filter(l=>l.severity==='critical').length, icon:'🚨', bg:'#fef2f2', color:'#b91c1c' },
-        ].map((s,i) => (
-          <div key={i} style={{ background:'white', borderRadius:'14px', border:'1px solid #e2e8f0', padding:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-            <div style={{ fontSize:'22px', marginBottom:'6px' }}>{s.icon}</div>
-            <div style={{ fontSize:'20px', fontWeight:'900', color:s.color }}>{s.value}</div>
-            <div style={{ fontSize:'11px', color:'#64748b', marginTop:'2px' }}>{s.label}</div>
-          </div>
-        ))}
+        <button
+          onClick={downloadCSV}
+          disabled={filteredLogs.length === 0}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '10px 16px',
+            background: filteredLogs.length > 0 ? '#059669' : '#94a3b8',
+            color: 'white',
+            border: 'none',
+            borderRadius: '10px',
+            fontSize: '13px',
+            fontWeight: '700',
+            cursor: filteredLogs.length > 0 ? 'pointer' : 'not-allowed',
+            fontFamily: 'Cairo, sans-serif',
+          }}
+        >
+          <Download size={15} />
+          تحميل CSV
+        </button>
       </div>
 
       {/* Filters */}
-      <div style={{ background:'white', borderRadius:'14px', border:'1px solid #e2e8f0', padding:'20px', marginBottom:'20px', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-        <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 1fr', gap:'12px' }}>
+      <div style={{
+        background: 'white',
+        borderRadius: '16px',
+        padding: '20px',
+        marginBottom: '20px',
+        border: '1px solid #f0f4f8',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+      }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          {/* بحث */}
           <div>
-            <label style={{ display:'block', fontSize:'12px', fontWeight:'700', color:'#374151', marginBottom:'6px' }}>🔍 البحث</label>
-            <input type="text" placeholder="ابحث عن عملية، مستخدم، أو تفاصيل..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}
-              style={{ ...sel }} />
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#374151', marginBottom: '6px' }}>
+              بحث
+            </label>
+            <div style={{ position: 'relative' }}>
+              <Search size={16} color="#94a3b8" style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="بحث بالاسم أو الوصف..."
+                style={{
+                  width: '100%',
+                  padding: '10px 14px 10px 36px',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontFamily: 'Cairo, sans-serif',
+                  color: '#1a202c',
+                  background: '#f8fafc',
+                }}
+              />
+            </div>
           </div>
+
+          {/* فلتر بالإجراء */}
           <div>
-            <label style={{ display:'block', fontSize:'12px', fontWeight:'700', color:'#374151', marginBottom:'6px' }}>نوع العملية</label>
-            <select value={filterAction} onChange={e=>setFilterAction(e.target.value as any)} style={sel}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#374151', marginBottom: '6px' }}>
+              الإجراء
+            </label>
+            <select
+              value={filterAction}
+              onChange={(e) => setFilterAction(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontFamily: 'Cairo, sans-serif',
+                color: '#1a202c',
+                background: 'white',
+                cursor: 'pointer',
+              }}
+            >
               <option value="all">الكل</option>
-              {Object.entries(actionColors).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+              <option value="create">إنشاء</option>
+              <option value="update">تعديل</option>
+              <option value="delete">حذف</option>
+              <option value="approve">موافقة</option>
+              <option value="reject">رفض</option>
             </select>
           </div>
+
+          {/* فلتر بالكيان */}
           <div>
-            <label style={{ display:'block', fontSize:'12px', fontWeight:'700', color:'#374151', marginBottom:'6px' }}>النوع</label>
-            <select value={filterEntity} onChange={e=>setFilterEntity(e.target.value as any)} style={sel}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#374151', marginBottom: '6px' }}>
+              نوع الكيان
+            </label>
+            <select
+              value={filterEntity}
+              onChange={(e) => setFilterEntity(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontFamily: 'Cairo, sans-serif',
+                color: '#1a202c',
+                background: 'white',
+                cursor: 'pointer',
+              }}
+            >
               <option value="all">الكل</option>
-              {Object.entries(entityLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+              <option value="exam">امتحان</option>
+              <option value="student">طالب</option>
+              <option value="grade">درجة</option>
+              <option value="retake_request">طلب إعادة</option>
+              <option value="user">مستخدم</option>
             </select>
           </div>
+
+          {/* فلتر بالدور */}
           <div>
-            <label style={{ display:'block', fontSize:'12px', fontWeight:'700', color:'#374151', marginBottom:'6px' }}>الأهمية</label>
-            <select value={filterSeverity} onChange={e=>setFilterSeverity(e.target.value as any)} style={sel}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#374151', marginBottom: '6px' }}>
+              دور المستخدم
+            </label>
+            <select
+              value={filterRole}
+              onChange={(e) => setFilterRole(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontFamily: 'Cairo, sans-serif',
+                color: '#1a202c',
+                background: 'white',
+                cursor: 'pointer',
+              }}
+            >
               <option value="all">الكل</option>
-              {Object.entries(severityColors).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+              <option value="admin">مسؤول</option>
+              <option value="teacher">مدرس</option>
+              <option value="student">طالب</option>
             </select>
           </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div style={{ background:'white', borderRadius:'14px', border:'1px solid #e2e8f0', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-        <div style={{ overflowX:'auto' }}>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
-            <thead>
-              <tr style={{ background:'#f8fafc', borderBottom:'2px solid #e2e8f0' }}>
-                {['المستخدم','نوع العملية','النوع','التفاصيل','التغيير','الوقت','الأهمية'].map(h => (
-                  <th key={h} style={{ padding:'12px 16px', textAlign:'right', color:'#475569', fontWeight:'700', fontSize:'12px' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={7} style={{ padding:'60px', textAlign:'center', color:'#94a3b8' }}>🔍 لا توجد نتائج</td></tr>
-              ) : filtered.map(log => {
-                const ac = actionColors[log.action];
-                const sv = severityColors[log.severity];
-                return (
-                  <tr key={log.id} style={{ borderTop:'1px solid #f1f5f9' }}
-                    onMouseEnter={e=>(e.currentTarget.style.background='#f8fafc')}
-                    onMouseLeave={e=>(e.currentTarget.style.background='white')}>
-                    <td style={{ padding:'12px 16px' }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                        <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px' }}>{log.userAvatar}</div>
-                        <div>
-                          <p style={{ fontWeight:'700', color:'#1e293b', margin:0, fontSize:'13px' }}>{log.userName}</p>
-                          <p style={{ fontSize:'11px', color:'#94a3b8', margin:0 }}>{log.userRole==='admin'?'👑 مسؤول':'👨‍🏫 مدرس'}</p>
-                        </div>
+      {/* Logs List */}
+      {filteredLogs.length === 0 ? (
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '60px 24px',
+          textAlign: 'center',
+          border: '1px solid #f0f4f8',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        }}>
+          <Activity size={48} color="#94a3b8" style={{ marginBottom: '16px' }} />
+          <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f2244', marginBottom: '8px' }}>
+            لا توجد سجلات
+          </h3>
+          <p style={{ fontSize: '14px', color: '#64748b' }}>
+            {logs.length === 0 ? 'لم يتم تسجيل أي نشاط بعد' : 'لا توجد نتائج مطابقة للفلاتر المحددة'}
+          </p>
+        </div>
+      ) : (
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '24px',
+          border: '1px solid #f0f4f8',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {filteredLogs.map(log => (
+              <div
+                key={log.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '14px',
+                  padding: '14px',
+                  background: '#f8fafc',
+                  borderRadius: '12px',
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                {/* Icon */}
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  border: '1px solid #e2e8f0',
+                }}>
+                  {getActionIcon(log.action)}
+                </div>
+
+                {/* Content */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                    <div>
+                      <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#0f2244', marginBottom: '4px' }}>
+                        {log.description}
+                      </h4>
+                      <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#64748b', flexWrap: 'wrap' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <User size={12} />
+                          {log.userName} ({log.userRole === 'admin' ? 'مسؤول' : log.userRole === 'teacher' ? 'مدرس' : 'طالب'})
+                        </span>
+                        <span>•</span>
+                        <span>{getActionLabel(log.action)} {getEntityLabel(log.entity)}</span>
+                        {log.entityName && (
+                          <>
+                            <span>•</span>
+                            <span>{log.entityName}</span>
+                          </>
+                        )}
                       </div>
-                    </td>
-                    <td style={{ padding:'12px 16px' }}>
-                      <span style={{ display:'inline-block', padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'700', background:ac.bg, color:ac.color }}>{ac.label}</span>
-                    </td>
-                    <td style={{ padding:'12px 16px', color:'#374151', fontWeight:'600' }}>{entityLabels[log.entityType]}</td>
-                    <td style={{ padding:'12px 16px' }}>
-                      <p style={{ fontWeight:'600', color:'#1e293b', margin:'0 0 2px', fontSize:'13px' }}>{log.entityName}</p>
-                      <p style={{ fontSize:'11px', color:'#64748b', margin:0 }}>{log.details}</p>
-                    </td>
-                    <td style={{ padding:'12px 16px' }}>
-                      {log.oldValue && log.newValue ? (
-                        <div style={{ fontSize:'11px' }}>
-                          <div style={{ color:'#dc2626', textDecoration:'line-through', marginBottom:'4px' }}>{log.oldValue}</div>
-                          <div style={{ color:'#16a34a', fontWeight:'600' }}>← {log.newValue}</div>
-                        </div>
-                      ) : <span style={{ color:'#94a3b8', fontSize:'11px' }}>-</span>}
-                    </td>
-                    <td style={{ padding:'12px 16px' }}>
-                      <p style={{ color:'#1e293b', fontWeight:'600', margin:'0 0 2px', fontSize:'13px' }}>{formatTime(log.timestamp)}</p>
-                      <p style={{ fontSize:'11px', color:'#94a3b8', margin:0 }}>{log.timestamp.toLocaleDateString('ar-EG',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</p>
-                    </td>
-                    <td style={{ padding:'12px 16px' }}>
-                      <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:sv.bg, color:sv.color }}>
-                        {sv.icon} {sv.label}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    </div>
 
-      {/* Footer */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:'white', borderRadius:'14px', border:'1px solid #e2e8f0', padding:'14px 20px', marginTop:'16px', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-        <p style={{ fontSize:'13px', color:'#475569', margin:0 }}>عرض <strong style={{ color:'#1e293b' }}>{filtered.length}</strong> من أصل <strong style={{ color:'#1e293b' }}>{logs.length}</strong> عملية</p>
-        <div style={{ display:'flex', gap:'8px' }}>
-          <button style={{ padding:'8px 16px', background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor:'pointer', fontFamily:'Cairo, sans-serif' }}>تصدير Excel</button>
-          <button style={{ padding:'8px 16px', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor:'pointer', fontFamily:'Cairo, sans-serif' }}>تحديث</button>
+                    <div style={{ textAlign: 'left', flexShrink: 0 }}>
+                      <p style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Clock size={11} />
+                        {getTimeAgo(log.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
 
-export default ActivityLogPage;
+export default ActivityLog;

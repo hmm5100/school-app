@@ -1,322 +1,537 @@
 // src/pages/Leaderboard.tsx
-// self-contained - no external imports - inline styles only
-
-import { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useState, useEffect } from 'react';
+import { Trophy, Award, Medal, TrendingUp, Star, Crown, Users, BookOpen } from 'lucide-react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import type { Grade } from '../types';
 
 // ─── Types ───────────────────────────────────
-interface HonorRollEntry {
+interface TopStudent {
+  studentId: string;
+  studentName: string;
+  className: string;
+  totalExams: number;
+  averagePercentage: number;
+  averageScore: number;
+  highestScore: number;
   rank: number;
+}
+
+interface SubjectLeader {
+  studentId: string;
   studentName: string;
   className: string;
   averagePercentage: number;
+  examCount: number;
 }
 
-interface ClassReport {
-  classId: string;
-  className: string;
-  presentCount: number;
-  totalStudents: number;
-  averageScore: number;
-}
-
-interface ArchivedExam {
-  id: string;
-  examTitle: string;
+interface SubjectLeaderboard {
+  subjectId: string;
   subjectName: string;
-  archivedAt: string;
-  classIds: string[];
-  statistics: {
-    totalStudents: number;
-    attendedCount: number;
-    averageScore: number;
-    passRate: number;
-    classReports: ClassReport[];
+  leaders: SubjectLeader[];
+}
+
+const Leaderboard = () => {
+  const [topStudents, setTopStudents] = useState<TopStudent[]>([]);
+  const [subjectLeaderboards, setSubjectLeaderboards] = useState<SubjectLeaderboard[]>([]);
+  const [selectedSubject, setSelectedSubject] = useState<string>('all');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadLeaderboard = async () => {
+      try {
+        // 1. جلب كل الدرجات
+        const gradesSnap = await getDocs(collection(db, 'grades'));
+        const grades: Grade[] = gradesSnap.docs.map(doc => ({
+          ...(doc.data() as Omit<Grade, 'id'>),
+          id: doc.id,
+        }));
+
+        if (grades.length === 0) {
+          setLoading(false);
+          return;
+        }
+
+        // 2. تجميع الطلاب
+        const studentMap = new Map<string, {
+          studentId: string;
+          studentName: string;
+          className: string;
+          totalPercentage: number;
+          totalScore: number;
+          examCount: number;
+          highestScore: number;
+        }>();
+
+        grades.forEach(grade => {
+          if (!studentMap.has(grade.studentId)) {
+            studentMap.set(grade.studentId, {
+              studentId: grade.studentId,
+              studentName: grade.studentName,
+              className: grade.classId, // سيتم تحديثه
+              totalPercentage: 0,
+              totalScore: 0,
+              examCount: 0,
+              highestScore: 0,
+            });
+          }
+
+          const student = studentMap.get(grade.studentId)!;
+          student.totalPercentage += grade.percentage;
+          student.totalScore += grade.score;
+          student.examCount++;
+          if (grade.score > student.highestScore) {
+            student.highestScore = grade.score;
+          }
+        });
+
+        // 3. جلب أسماء الفصول
+        const classesSnap = await getDocs(collection(db, 'classes'));
+        const classNamesMap = new Map(
+          classesSnap.docs.map(doc => [doc.id, doc.data().name || 'غير محدد'])
+        );
+
+        // 4. بناء قائمة أفضل الطلاب
+        const topList: TopStudent[] = Array.from(studentMap.values())
+          .map(student => ({
+            studentId: student.studentId,
+            studentName: student.studentName,
+            className: classNamesMap.get(student.className) || 'غير محدد',
+            totalExams: student.examCount,
+            averagePercentage: Math.round((student.totalPercentage / student.examCount) * 100) / 100,
+            averageScore: Math.round((student.totalScore / student.examCount) * 100) / 100,
+            highestScore: student.highestScore,
+            rank: 0, // سيتم حسابه
+          }))
+          .sort((a, b) => b.averagePercentage - a.averagePercentage)
+          .slice(0, 20); // أفضل 20 طالب
+
+        // ترتيب
+        topList.forEach((student, idx) => {
+          student.rank = idx + 1;
+        });
+
+        setTopStudents(topList);
+
+        // 5. لوحة الشرف حسب المواد
+        const subjectMap = new Map<string, {
+          subjectName: string;
+          students: Map<string, {
+            studentId: string;
+            studentName: string;
+            className: string;
+            totalPercentage: number;
+            examCount: number;
+          }>;
+        }>();
+
+        grades.forEach(grade => {
+          if (!subjectMap.has(grade.subjectId)) {
+            subjectMap.set(grade.subjectId, {
+              subjectName: grade.subjectName,
+              students: new Map(),
+            });
+          }
+
+          const subject = subjectMap.get(grade.subjectId)!;
+
+          if (!subject.students.has(grade.studentId)) {
+            subject.students.set(grade.studentId, {
+              studentId: grade.studentId,
+              studentName: grade.studentName,
+              className: classNamesMap.get(grade.classId) || 'غير محدد',
+              totalPercentage: 0,
+              examCount: 0,
+            });
+          }
+
+          const student = subject.students.get(grade.studentId)!;
+          student.totalPercentage += grade.percentage;
+          student.examCount++;
+        });
+
+        const subjectLeaders: SubjectLeaderboard[] = Array.from(subjectMap.entries()).map(([subjectId, data]) => {
+          const leaders = Array.from(data.students.values())
+            .map(student => ({
+              studentId: student.studentId,
+              studentName: student.studentName,
+              className: student.className,
+              averagePercentage: Math.round((student.totalPercentage / student.examCount) * 100) / 100,
+              examCount: student.examCount,
+            }))
+            .sort((a, b) => b.averagePercentage - a.averagePercentage)
+            .slice(0, 3); // أفضل 3 طلاب في كل مادة
+
+          return {
+            subjectId,
+            subjectName: data.subjectName,
+            leaders,
+          };
+        });
+
+        setSubjectLeaderboards(subjectLeaders);
+      } catch (err) {
+        console.error('خطأ في تحميل لوحة الشرف:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadLeaderboard();
+  }, []);
+
+  // ═══ Medal Icon ═══
+  const getMedalIcon = (rank: number) => {
+    if (rank === 1) return <Crown size={24} color="#FFD700" />;
+    if (rank === 2) return <Medal size={22} color="#C0C0C0" />;
+    if (rank === 3) return <Medal size={20} color="#CD7F32" />;
+    return <Star size={18} color="#94a3b8" />;
   };
-}
 
-interface AuditLogEntry {
-  id: string;
-  action: string;
-  targetType: string;
-  userRole: string;
-  userName: string;
-  details: string;
-  timestamp: string;
-}
+  // ═══ Medal Color ═══
+  const getMedalColor = (rank: number) => {
+    if (rank === 1) return { bg: '#fffbeb', border: '#fde68a', text: '#92400e' };
+    if (rank === 2) return { bg: '#f8fafc', border: '#cbd5e1', text: '#475569' };
+    if (rank === 3) return { bg: '#fff7ed', border: '#fed7aa', text: '#9a3412' };
+    return { bg: '#f8fafc', border: '#e2e8f0', text: '#64748b' };
+  };
 
-type TabKey = 'leaderboard' | 'archive' | 'audit';
-
-// ─── Mock Data (استبدلها ببياناتك الحقيقية) ──
-const MOCK_HONOR: HonorRollEntry[] = [
-  { rank: 1, studentName: 'أحمد محمود',   className: 'الصف الثالث أ', averagePercentage: 97 },
-  { rank: 2, studentName: 'سارة خالد',    className: 'الصف الثاني ب', averagePercentage: 94 },
-  { rank: 3, studentName: 'محمد عبدالله', className: 'الصف الثالث ب', averagePercentage: 92 },
-  { rank: 4, studentName: 'نور الهدى',    className: 'الصف الأول أ',  averagePercentage: 89 },
-  { rank: 5, studentName: 'يوسف إبراهيم', className: 'الصف الثاني أ', averagePercentage: 87 },
-  { rank: 6, studentName: 'فاطمة علي',    className: 'الصف الثالث أ', averagePercentage: 85 },
-  { rank: 7, studentName: 'عمر حسن',      className: 'الصف الأول ب',  averagePercentage: 83 },
-];
-
-const MOCK_ARCHIVED: ArchivedExam[] = [
-  {
-    id: 'a1', examTitle: 'امتحان الجبر النهائي', subjectName: 'رياضيات', archivedAt: '2024-09-01',
-    classIds: ['c1', 'c2'],
-    statistics: {
-      totalStudents: 60, attendedCount: 55, averageScore: 72, passRate: 88,
-      classReports: [
-        { classId: 'c1', className: 'الصف الثالث أ', presentCount: 28, totalStudents: 30, averageScore: 75 },
-        { classId: 'c2', className: 'الصف الثالث ب', presentCount: 27, totalStudents: 30, averageScore: 69 },
-      ],
-    },
-  },
-  {
-    id: 'a2', examTitle: 'امتحان النحو الفصلي', subjectName: 'عربي', archivedAt: '2024-08-15',
-    classIds: ['c1'],
-    statistics: {
-      totalStudents: 30, attendedCount: 29, averageScore: 81, passRate: 93,
-      classReports: [
-        { classId: 'c1', className: 'الصف الثاني أ', presentCount: 29, totalStudents: 30, averageScore: 81 },
-      ],
-    },
-  },
-];
-
-const MOCK_AUDIT: AuditLogEntry[] = [
-  { id: 'l1', action: 'تعديل درجات امتحان الجبر', targetType: 'grade',   userRole: 'teacher', userName: 'مدرس الرياضيات', details: 'تم تعديل درجة الطالب أحمد من 85 إلى 90',  timestamp: '2024-10-10T09:00:00' },
-  { id: 'l2', action: 'إضافة طالب جديد',           targetType: 'student', userRole: 'admin',   userName: 'المدير',          details: 'تم إضافة الطالبة فاطمة علي للصف الثالث أ', timestamp: '2024-10-09T14:30:00' },
-  { id: 'l3', action: 'أرشفة امتحان النحو',        targetType: 'exam',    userRole: 'admin',   userName: 'المدير',          details: 'تم أرشفة امتحان النحو الفصلي',             timestamp: '2024-10-08T11:15:00' },
-  { id: 'l4', action: 'تعيين مدرس جديد',           targetType: 'teacher', userRole: 'admin',   userName: 'المدير',          details: 'تم تعيين الأستاذ محمود لمادة الفيزياء',   timestamp: '2024-10-07T08:00:00' },
-];
-
-// ─── Helpers ─────────────────────────────────
-function gradeColor(p: number): string {
-  if (p >= 90) return '#16a34a';
-  if (p >= 75) return '#2563eb';
-  if (p >= 60) return '#d97706';
-  return '#dc2626';
-}
-
-function formatDate(d: string): string {
-  return new Intl.DateTimeFormat('ar-EG', {
-    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(d));
-}
-
-function actionIcon(targetType: string): string {
-  const map: Record<string, string> = { exam: '📝', grade: '✏️', student: '👤', teacher: '🧑‍🏫', attendance: '📋' };
-  return map[targetType] || '🔧';
-}
-
-// ─── Sub Components ───────────────────────────
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1, padding: '12px 0', textAlign: 'center', fontSize: 13, fontWeight: 500,
-        border: 'none', borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
-        background: active ? 'rgba(37,99,235,0.04)' : 'transparent',
-        color: active ? '#2563eb' : '#6b7280', cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function PodiumCard({ entry }: { entry: HonorRollEntry }) {
-  const medal = entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : '🥉';
-  const isFirst = entry.rank === 1;
-  return (
-    <div style={{
-      flex: 1, maxWidth: 140, border: `2px solid ${isFirst ? '#fde047' : '#e5e7eb'}`,
-      borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', padding: 12, textAlign: 'center',
-      background: isFirst ? '#fefce8' : '#f9fafb', minHeight: isFirst ? 140 : 110,
-    }}>
-      <div style={{ fontSize: isFirst ? 28 : 22 }}>{medal}</div>
-      <div style={{ fontSize: isFirst ? 14 : 13, fontWeight: 500, color: '#111827', marginTop: 4 }}>{entry.studentName}</div>
-      <div style={{ fontSize: 11, color: '#6b7280' }}>{entry.className}</div>
-      <div style={{ fontSize: isFirst ? 18 : 16, fontWeight: 500, color: gradeColor(entry.averagePercentage), marginTop: 4 }}>
-        {entry.averagePercentage}%
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Component ───────────────────────────
-export default function Leaderboard() {
-  const { userRole } = useAuth();
-  const [activeTab, setActiveTab]           = useState<TabKey>('leaderboard');
-  const [classFilter, setClassFilter]       = useState('');
-  const [topN, setTopN]                     = useState(10);
-  const [expandedArchive, setExpandedArchive] = useState<string | null>(null);
-
-  const CLASSES = [...new Set(MOCK_HONOR.map(h => h.className))];
-
-  const filteredHonor = MOCK_HONOR
-    .filter(h => !classFilter || h.className === classFilter)
-    .slice(0, topN);
-
-  const top3 = filteredHonor.slice(0, 3);
-  const rest  = filteredHonor.slice(3);
-
-  return (
-    <div style={{ minHeight: '100vh', background: '#f9fafb', padding: '1.5rem', direction: 'rtl' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 500, color: '#111827', margin: 0 }}>🏆 لوحة الشرف والأرشيف</h1>
-        <p style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>أفضل الطلاب، الامتحانات المؤرشفة، وسجل التعديلات</p>
-      </div>
-
-      {/* Card */}
-      <div style={{ background: '#fff', borderRadius: 14, border: '0.5px solid #e5e7eb', overflow: 'hidden' }}>
-        {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '0.5px solid #e5e7eb' }}>
-          <TabButton active={activeTab === 'leaderboard'} onClick={() => setActiveTab('leaderboard')}>🏆 لوحة الشرف</TabButton>
-          {userRole !== 'student' && (
-            <TabButton active={activeTab === 'archive'} onClick={() => setActiveTab('archive')}>📦 الأرشيف</TabButton>
-          )}
-          {userRole === 'admin' && (
-            <TabButton active={activeTab === 'audit'} onClick={() => setActiveTab('audit')}>📋 سجل التعديلات</TabButton>
-          )}
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '60vh',
+        fontFamily: 'Cairo, sans-serif',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '4px solid #e2e8f0',
+            borderTop: '4px solid #2555a0',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px',
+          }} />
+          <p style={{ color: '#64748b', fontSize: '14px' }}>جاري تحميل لوحة الشرف...</p>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
-        {/* ── Tab: Leaderboard ── */}
-        {activeTab === 'leaderboard' && (
-          <div style={{ padding: 20 }}>
-            {/* Filters */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-              <select
-                value={classFilter}
-                onChange={e => setClassFilter(e.target.value)}
-                style={{ border: '0.5px solid #d1d5db', borderRadius: 8, padding: '8px 12px', fontSize: 13, background: '#fff', color: '#111827' }}
-              >
-                <option value="">كل الفصول</option>
-                {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <select
-                value={topN}
-                onChange={e => setTopN(Number(e.target.value))}
-                style={{ border: '0.5px solid #d1d5db', borderRadius: 8, padding: '8px 12px', fontSize: 13, background: '#fff', color: '#111827' }}
-              >
-                <option value={5}>أفضل 5</option>
-                <option value={10}>أفضل 10</option>
-                <option value={20}>أفضل 20</option>
-                <option value={50}>أفضل 50</option>
-              </select>
+  if (topStudents.length === 0) {
+    return (
+      <div style={{ fontFamily: 'Cairo, sans-serif', direction: 'rtl' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f2244', marginBottom: '24px' }}>
+          لوحة الشرف 🏆
+        </h1>
+
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '60px 24px',
+          textAlign: 'center',
+          border: '1px solid #f0f4f8',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        }}>
+          <Trophy size={48} color="#94a3b8" style={{ marginBottom: '16px' }} />
+          <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f2244', marginBottom: '8px' }}>
+            لا توجد بيانات متاحة بعد
+          </h3>
+          <p style={{ fontSize: '14px', color: '#64748b' }}>
+            لم يتم تسجيل أي درجات حتى الآن. قم بتصحيح بعض الامتحانات لعرض أفضل الطلاب.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const filteredBySubject = selectedSubject === 'all'
+    ? null
+    : subjectLeaderboards.find(s => s.subjectId === selectedSubject);
+
+  return (
+    <div style={{ fontFamily: 'Cairo, sans-serif', direction: 'rtl' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '32px' }}>
+        <h1 style={{ fontSize: '28px', fontWeight: '900', color: '#0f2244', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Trophy size={32} color="#FFD700" />
+          لوحة الشرف
+        </h1>
+        <p style={{ color: '#64748b', fontSize: '14px' }}>
+          الطلاب الأوائل حسب المعدل التراكمي في جميع الامتحانات
+        </p>
+      </div>
+
+      {/* Filter */}
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#374151', marginBottom: '8px' }}>
+          عرض حسب المادة
+        </label>
+        <select
+          value={selectedSubject}
+          onChange={(e) => setSelectedSubject(e.target.value)}
+          style={{
+            padding: '10px 14px',
+            border: '1.5px solid #e2e8f0',
+            borderRadius: '10px',
+            fontSize: '13px',
+            fontWeight: '600',
+            fontFamily: 'Cairo, sans-serif',
+            color: '#1a202c',
+            background: 'white',
+            cursor: 'pointer',
+            minWidth: '250px',
+          }}
+        >
+          <option value="all">جميع المواد (الترتيب العام)</option>
+          {subjectLeaderboards.map(subject => (
+            <option key={subject.subjectId} value={subject.subjectId}>
+              {subject.subjectName}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Top 3 Podium */}
+      {selectedSubject === 'all' && topStudents.length >= 3 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'flex-end',
+          gap: '16px',
+          marginBottom: '32px',
+        }}>
+          {/* 2nd Place */}
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '24px 20px',
+            textAlign: 'center',
+            border: '2px solid #cbd5e1',
+            minWidth: '180px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          }}>
+            <div style={{ marginBottom: '12px' }}>
+              <Medal size={48} color="#C0C0C0" />
             </div>
-
-            {/* Podium */}
-            {top3.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', gap: 12, marginBottom: '1.5rem' }}>
-                {top3.length > 1 && <PodiumCard entry={top3[1]} />}
-                <PodiumCard entry={top3[0]} />
-                {top3.length > 2 && <PodiumCard entry={top3[2]} />}
-              </div>
-            )}
-
-            {/* Rest of list */}
-            {rest.map(h => (
-              <div key={h.rank} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '0.5px solid #f3f4f6' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 500, color: '#6b7280', flexShrink: 0 }}>
-                  #{h.rank}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 14, color: '#111827', margin: 0 }}>{h.studentName}</p>
-                  <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>{h.className}</p>
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 500, color: gradeColor(h.averagePercentage) }}>
-                  {h.averagePercentage}%
-                </div>
-              </div>
-            ))}
+            <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#0f2244', marginBottom: '4px' }}>
+              {topStudents[1].studentName}
+            </h3>
+            <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
+              {topStudents[1].className}
+            </p>
+            <div style={{
+              background: '#f8fafc',
+              padding: '8px',
+              borderRadius: '8px',
+              marginBottom: '8px',
+            }}>
+              <p style={{ fontSize: '24px', fontWeight: '900', color: '#475569' }}>
+                {topStudents[1].averagePercentage}%
+              </p>
+            </div>
+            <p style={{ fontSize: '11px', color: '#94a3b8' }}>
+              {topStudents[1].totalExams} امتحان
+            </p>
           </div>
-        )}
 
-        {/* ── Tab: Archive ── */}
-        {activeTab === 'archive' && userRole !== 'student' && (
-          <div style={{ padding: 20 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 4px' }}>الامتحانات المؤرشفة</h2>
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>الامتحانات المنتهية والمحفوظة</p>
-
-            {MOCK_ARCHIVED.map(a => (
-              <div key={a.id} style={{ border: '0.5px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', marginBottom: 10 }}>
-                {/* Row */}
-                <div
-                  onClick={() => setExpandedArchive(expandedArchive === a.id ? null : a.id)}
-                  style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                >
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 500, color: '#111827', margin: 0 }}>{a.examTitle}</p>
-                    <p style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>{a.subjectName} · أُرشف {formatDate(a.archivedAt)}</p>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 11, background: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: 20 }}>{a.classIds.length} فصل</span>
-                    <span style={{ color: '#9ca3af' }}>{expandedArchive === a.id ? '▲' : '▼'}</span>
-                  </div>
-                </div>
-
-                {/* Expanded */}
-                {expandedArchive === a.id && (
-                  <div style={{ borderTop: '0.5px solid #f3f4f6', padding: 16, background: '#f9fafb' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 12 }}>
-                      {[
-                        { label: 'إجمالي الطلاب', value: a.statistics.totalStudents, color: '#111827' },
-                        { label: 'الحاضرون',       value: a.statistics.attendedCount, color: '#2563eb' },
-                        { label: 'متوسط الدرجات',  value: a.statistics.averageScore,  color: '#16a34a' },
-                        { label: 'نسبة النجاح',    value: `${a.statistics.passRate}%`, color: '#d97706' },
-                      ].map((s, i) => (
-                        <div key={i} style={{ background: '#fff', borderRadius: 8, padding: 10, textAlign: 'center', border: '0.5px solid #e5e7eb' }}>
-                          <div style={{ fontSize: 18, fontWeight: 500, color: s.color }}>{s.value}</div>
-                          <div style={{ fontSize: 11, color: '#6b7280' }}>{s.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {a.statistics.classReports.map(cr => (
-                      <div key={cr.classId} style={{ background: '#fff', borderRadius: 8, padding: '10px 16px', border: '0.5px solid #e5e7eb', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{cr.className}</span>
-                        <span style={{ fontSize: 12, color: '#6b7280' }}>{cr.presentCount}/{cr.totalStudents} حاضر · متوسط: {cr.averageScore}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+          {/* 1st Place */}
+          <div style={{
+            background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+            borderRadius: '20px',
+            padding: '32px 24px',
+            textAlign: 'center',
+            border: '3px solid #fde68a',
+            minWidth: '200px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            transform: 'scale(1.05)',
+          }}>
+            <div style={{ marginBottom: '16px' }}>
+              <Crown size={56} color="#FFD700" />
+            </div>
+            <h3 style={{ fontSize: '18px', fontWeight: '900', color: '#92400e', marginBottom: '4px' }}>
+              {topStudents[0].studentName}
+            </h3>
+            <p style={{ fontSize: '13px', color: '#78350f', marginBottom: '12px' }}>
+              {topStudents[0].className}
+            </p>
+            <div style={{
+              background: 'white',
+              padding: '12px',
+              borderRadius: '10px',
+              marginBottom: '12px',
+              border: '2px solid #fde68a',
+            }}>
+              <p style={{ fontSize: '32px', fontWeight: '900', color: '#92400e' }}>
+                {topStudents[0].averagePercentage}%
+              </p>
+            </div>
+            <p style={{ fontSize: '12px', color: '#78350f', fontWeight: '600' }}>
+              {topStudents[0].totalExams} امتحان
+            </p>
           </div>
-        )}
 
-        {/* ── Tab: Audit ── */}
-        {activeTab === 'audit' && userRole === 'admin' && (
-          <div style={{ padding: 20 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 4px' }}>سجل التعديلات</h2>
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>جميع الإجراءات التي تمت بواسطة المشرفين والمدرسين</p>
+          {/* 3rd Place */}
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '24px 20px',
+            textAlign: 'center',
+            border: '2px solid #fed7aa',
+            minWidth: '180px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          }}>
+            <div style={{ marginBottom: '12px' }}>
+              <Medal size={48} color="#CD7F32" />
+            </div>
+            <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#0f2244', marginBottom: '4px' }}>
+              {topStudents[2].studentName}
+            </h3>
+            <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>
+              {topStudents[2].className}
+            </p>
+            <div style={{
+              background: '#fff7ed',
+              padding: '8px',
+              borderRadius: '8px',
+              marginBottom: '8px',
+            }}>
+              <p style={{ fontSize: '24px', fontWeight: '900', color: '#9a3412' }}>
+                {topStudents[2].averagePercentage}%
+              </p>
+            </div>
+            <p style={{ fontSize: '11px', color: '#94a3b8' }}>
+              {topStudents[2].totalExams} امتحان
+            </p>
+          </div>
+        </div>
+      )}
 
-            {MOCK_AUDIT.map(log => (
-              <div key={log.id} style={{ display: 'flex', gap: 12, padding: '12px 0', borderBottom: '0.5px solid #f3f4f6' }}>
-                <div style={{ fontSize: 18, flexShrink: 0 }}>{actionIcon(log.targetType)}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{log.action}</span>
-                    <span style={{
-                      fontSize: 11, padding: '2px 8px', borderRadius: 20,
-                      background: log.userRole === 'admin' ? '#f3e8ff' : '#dbeafe',
-                      color:      log.userRole === 'admin' ? '#6b21a8' : '#1e40af',
+      {/* Full List or Subject Leaders */}
+      <div style={{
+        background: 'white',
+        borderRadius: '16px',
+        padding: '24px',
+        border: '1px solid #f0f4f8',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+      }}>
+        {selectedSubject === 'all' ? (
+          <>
+            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#0f2244', marginBottom: '20px' }}>
+              الترتيب الكامل
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {topStudents.map(student => {
+                const colors = getMedalColor(student.rank);
+                return (
+                  <div
+                    key={student.studentId}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '16px',
+                      padding: '14px 16px',
+                      background: colors.bg,
+                      borderRadius: '12px',
+                      border: `1.5px solid ${colors.border}`,
+                    }}
+                  >
+                    <div style={{
+                      width: '50px',
+                      height: '50px',
+                      borderRadius: '12px',
+                      background: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
                     }}>
-                      {log.userRole === 'admin' ? 'مدير' : 'مدرس'}
-                    </span>
+                      {getMedalIcon(student.rank)}
+                    </div>
+
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <h4 style={{ fontSize: '15px', fontWeight: '800', color: '#0f2244' }}>
+                          {student.rank}. {student.studentName}
+                        </h4>
+                        <p style={{ fontSize: '20px', fontWeight: '900', color: colors.text }}>
+                          {student.averagePercentage}%
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#64748b' }}>
+                        <span>{student.className}</span>
+                        <span>• {student.totalExams} امتحان</span>
+                        <span>• أعلى درجة: {student.highestScore}</span>
+                      </div>
+                    </div>
                   </div>
-                  <p style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>{log.details}</p>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
-                    👤 {log.userName} &nbsp;·&nbsp; 🕐 {formatDate(log.timestamp)}
+                );
+              })}
+            </div>
+          </>
+        ) : filteredBySubject ? (
+          <>
+            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#0f2244', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <BookOpen size={20} />
+              {filteredBySubject.subjectName}
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {filteredBySubject.leaders.map((leader, idx) => {
+                const rank = idx + 1;
+                const colors = getMedalColor(rank);
+                return (
+                  <div
+                    key={leader.studentId}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '16px',
+                      padding: '16px',
+                      background: colors.bg,
+                      borderRadius: '12px',
+                      border: `2px solid ${colors.border}`,
+                    }}
+                  >
+                    <div style={{
+                      width: '56px',
+                      height: '56px',
+                      borderRadius: '14px',
+                      background: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      {getMedalIcon(rank)}
+                    </div>
+
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ fontSize: '16px', fontWeight: '800', color: '#0f2244', marginBottom: '4px' }}>
+                        {leader.studentName}
+                      </h4>
+                      <p style={{ fontSize: '13px', color: '#64748b' }}>
+                        {leader.className} • {leader.examCount} امتحان
+                      </p>
+                    </div>
+
+                    <div style={{ textAlign: 'left' }}>
+                      <p style={{ fontSize: '28px', fontWeight: '900', color: colors.text }}>
+                        {leader.averagePercentage}%
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
   );
-}
+};
+
+export default Leaderboard;

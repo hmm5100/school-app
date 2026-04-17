@@ -32,6 +32,8 @@ import ExamSettings from './pages/ExamSettings';
 import ExamResults from './pages/ExamResults';
 import TakeExam from './pages/TakeExam';
 import ExamReview from './pages/ExamReview';
+import AdminExamReview from './pages/AdminExamReview'; // ✅ جديد
+import Teachers from './pages/Teachers'; // ✅ صفحة المدرسين
 
 // Phase 6 - Reports & Analytics
 import Reports from './pages/Reports';
@@ -120,11 +122,19 @@ function App() {
 
             <Route path="/subjects" element={<MaterialsManagement />} />
 
+            <Route
+              path="/teachers"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <Teachers />
+                </ProtectedRoute>
+              }
+            />
+
             {/* ══════════════════════════════════
                 EXAMS ROUTES
             ══════════════════════════════════ */}
 
-            {/* قائمة الامتحانات — كل الأدوار */}
             <Route
               path="/exams"
               element={
@@ -134,7 +144,6 @@ function App() {
               }
             />
 
-            {/* إنشاء امتحان جديد — أدمن ومدرس فقط */}
             <Route
               path="/exams/new"
               element={
@@ -144,7 +153,6 @@ function App() {
               }
             />
 
-            {/* إعدادات الامتحان — أدمن ومدرس فقط */}
             <Route
               path="/exams/:id/settings"
               element={
@@ -154,7 +162,6 @@ function App() {
               }
             />
 
-            {/* نتائج الامتحان — أدمن ومدرس فقط */}
             <Route
               path="/exams/:id/results"
               element={
@@ -164,7 +171,17 @@ function App() {
               }
             />
 
-            {/* أداء الامتحان — الطالب فقط (المسار الرئيسي) */}
+            {/* ✅ مراجعة حل طالب معين — أدمن ومدرس فقط */}
+            <Route
+              path="/exams/:id/review/:studentId"
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'teacher']}>
+                  <AdminExamReview />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* أداء الامتحان — الطالب فقط */}
             <Route
               path="/exams/:id/take"
               element={
@@ -174,7 +191,6 @@ function App() {
               }
             />
 
-            {/* المسار القديم /student يوجَّه لـ TakeExam مباشرة */}
             <Route
               path="/exams/:id/student"
               element={
@@ -194,7 +210,7 @@ function App() {
               }
             />
 
-            {/* مسار عام للامتحان — يوجه حسب الدور */}
+            {/* مسار عام للامتحان — يوجه لـ ExamSettings */}
             <Route
               path="/exams/:id"
               element={
@@ -206,7 +222,6 @@ function App() {
 
             {/* ══════════════════════════════════ */}
 
-            {/* Grades */}
             <Route
               path="/grades"
               element={
@@ -216,7 +231,6 @@ function App() {
               }
             />
 
-            {/* Exam Retake Requests — admin + teacher */}
             <Route
               path="/exam-retake-requests"
               element={
@@ -226,7 +240,6 @@ function App() {
               }
             />
 
-            {/* Reports – admin + teacher */}
             <Route
               path="/reports"
               element={

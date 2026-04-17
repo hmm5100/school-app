@@ -1,7 +1,14 @@
 // src/pages/Reports.tsx
-// self-contained - no external imports - inline styles only
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import {
+  BarChart2, TrendingUp, TrendingDown, Users, Award,
+  CheckCircle, XCircle, Clock, FileText, Download,
+  ChevronDown, Eye, AlertCircle, BookOpen,
+} from 'lucide-react';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { useNavigate } from 'react-router-dom';
+import type { Exam, StudentAnswer, Grade } from '../types';
 
 // ─── Types ───────────────────────────────────
 interface StudentResult {
@@ -47,366 +54,694 @@ interface ExamStatistics {
 
 type TabKey = 'overview' | 'class' | 'attendance';
 
-// ─── Mock Data (استبدلها ببياناتك الحقيقية) ──
-const MOCK_EXAMS: { id: string; title: string; subjectName: string }[] = [
-  { id: 'e1', title: 'امتحان الجبر',  subjectName: 'رياضيات' },
-  { id: 'e2', title: 'امتحان النحو',  subjectName: 'عربي'    },
-];
-
-const MOCK_STATS: Record<string, ExamStatistics> = {
-  e1: {
-    examId: 'e1', title: 'امتحان الجبر', subjectName: 'رياضيات',
-    totalStudents: 60, attendedCount: 55, passCount: 48, failCount: 7, absentCount: 5,
-    averageScore: 73.5, passRate: 87.3, highestScore: 98, lowestScore: 41, totalScore: 100,
-    classReports: [
-      {
-        classId: 'c1', className: 'الصف الثالث أ', totalStudents: 30, presentCount: 28, passCount: 25, averageScore: 76, passRate: 89,
-        results: [
-          { studentId: 's1', studentName: 'أحمد محمود',  studentNumber: 1, classId: 'c1', className: 'الصف الثالث أ', score: 95, totalScore: 100, percentage: 95, grade: 'A+', isPresent: true },
-          { studentId: 's2', studentName: 'سارة خالد',   studentNumber: 2, classId: 'c1', className: 'الصف الثالث أ', score: 88, totalScore: 100, percentage: 88, grade: 'A',  isPresent: true },
-          { studentId: 's3', studentName: 'محمد علي',    studentNumber: 3, classId: 'c1', className: 'الصف الثالث أ', score: 72, totalScore: 100, percentage: 72, grade: 'B',  isPresent: true },
-          { studentId: 's4', studentName: 'نور أحمد',    studentNumber: 4, classId: 'c1', className: 'الصف الثالث أ', score:  0, totalScore: 100, percentage:  0, grade: '-',  isPresent: false },
-          { studentId: 's5', studentName: 'يوسف حسن',   studentNumber: 5, classId: 'c1', className: 'الصف الثالث أ', score: 55, totalScore: 100, percentage: 55, grade: 'C',  isPresent: true },
-        ],
-      },
-      {
-        classId: 'c2', className: 'الصف الثالث ب', totalStudents: 30, presentCount: 27, passCount: 23, averageScore: 70, passRate: 85,
-        results: [
-          { studentId: 's6', studentName: 'فاطمة عبدالله', studentNumber: 1, classId: 'c2', className: 'الصف الثالث ب', score: 91, totalScore: 100, percentage: 91, grade: 'A+', isPresent: true },
-          { studentId: 's7', studentName: 'عمر إبراهيم',  studentNumber: 2, classId: 'c2', className: 'الصف الثالث ب', score: 45, totalScore: 100, percentage: 45, grade: 'F',  isPresent: true },
-          { studentId: 's8', studentName: 'ريم سالم',     studentNumber: 3, classId: 'c2', className: 'الصف الثالث ب', score:  0, totalScore: 100, percentage:  0, grade: '-',  isPresent: false },
-        ],
-      },
-    ],
-  },
-  e2: {
-    examId: 'e2', title: 'امتحان النحو', subjectName: 'عربي',
-    totalStudents: 30, attendedCount: 29, passCount: 26, failCount: 3, absentCount: 1,
-    averageScore: 81, passRate: 93, highestScore: 100, lowestScore: 52, totalScore: 90,
-    classReports: [
-      {
-        classId: 'c3', className: 'الصف الثاني أ', totalStudents: 30, presentCount: 29, passCount: 26, averageScore: 81, passRate: 93,
-        results: [
-          { studentId: 't1', studentName: 'لينا مصطفى', studentNumber: 1, classId: 'c3', className: 'الصف الثاني أ', score: 88, totalScore: 90, percentage: 98, grade: 'A+', isPresent: true },
-          { studentId: 't2', studentName: 'كريم عادل',  studentNumber: 2, classId: 'c3', className: 'الصف الثاني أ', score: 60, totalScore: 90, percentage: 67, grade: 'C',  isPresent: true },
-          { studentId: 't3', studentName: 'منى حسين',   studentNumber: 3, classId: 'c3', className: 'الصف الثاني أ', score:  0, totalScore: 90, percentage:  0, grade: '-',  isPresent: false },
-        ],
-      },
-    ],
-  },
-};
-
 // ─── Helpers ─────────────────────────────────
 function gradeColor(p: number): string {
-  if (p >= 90) return '#16a34a';
-  if (p >= 75) return '#2563eb';
-  if (p >= 60) return '#d97706';
-  return '#dc2626';
+  if (p >= 85) return '#059669';
+  if (p >= 65) return '#2555a0';
+  if (p >= 50) return '#d97706';
+  return '#ef4444';
 }
 
-// ─── Sub Components ───────────────────────────
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1, padding: '12px 0', textAlign: 'center', fontSize: 13, fontWeight: 500,
-        border: 'none', borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
-        background: active ? 'rgba(37,99,235,0.04)' : 'transparent',
-        color: active ? '#2563eb' : '#6b7280', cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  );
+function getGradeLabel(p: number): string {
+  if (p >= 85) return 'A';
+  if (p >= 75) return 'B';
+  if (p >= 65) return 'C';
+  if (p >= 50) return 'D';
+  return 'F';
 }
 
-function StatCard({ label, value, icon, bg, color }: { label: string; value: string | number; icon: string; bg: string; color: string }) {
-  return (
-    <div style={{ borderRadius: 12, padding: 16, background: bg, color }}>
-      <div style={{ fontSize: 22, marginBottom: 4 }}>{icon}</div>
-      <div style={{ fontSize: 22, fontWeight: 500 }}>{value}</div>
-      <div style={{ fontSize: 12, marginTop: 2, opacity: 0.8 }}>{label}</div>
-    </div>
-  );
-}
+// ─── Main Component ──────────────────────────
+const Reports = () => {
+  const navigate = useNavigate();
 
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#9ca3af' }}>
-      <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
-      <p style={{ fontSize: 14 }}>{message}</p>
-    </div>
-  );
-}
+  const [exams, setExams] = useState<{ id: string; title: string; subjectName: string }[]>([]);
+  const [selectedExamId, setSelectedExamId] = useState<string>('');
+  const [statistics, setStatistics] = useState<ExamStatistics | null>(null);
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-// ─── Main Component ───────────────────────────
-export default function Reports() {
-  const [selectedExamId, setSelectedExamId]   = useState('');
-  const [selectedClassId, setSelectedClassId] = useState('');
-  const [activeTab, setActiveTab]             = useState<TabKey>('overview');
-  const [attendanceMap, setAttendanceMap]     = useState<Record<string, boolean>>({});
-  const [attendanceSaved, setAttendanceSaved] = useState(false);
+  // ═══ Load Exams on Mount ═══
+  useEffect(() => {
+    const loadExams = async () => {
+      try {
+        const examsSnap = await getDocs(collection(db, 'exams'));
+        const examsList = examsSnap.docs.map(doc => ({
+          id: doc.id,
+          title: doc.data().title || 'بدون عنوان',
+          subjectName: doc.data().subjectName || 'غير محدد',
+        }));
 
-  const examStats    = selectedExamId ? MOCK_STATS[selectedExamId] : null;
-  const classReport  = examStats?.classReports.find(c => c.classId === selectedClassId) ?? null;
+        setExams(examsList);
 
-  const handleExamChange = (id: string) => {
-    setSelectedExamId(id);
-    setSelectedClassId('');
-    setAttendanceMap({});
-    setActiveTab('overview');
-    // اذا فصل واحد بس، اختاره تلقائياً
-    if (id && MOCK_STATS[id]?.classReports.length === 1) {
-      const cr = MOCK_STATS[id].classReports[0];
-      setSelectedClassId(cr.classId);
-      const map: Record<string, boolean> = {};
-      cr.results.forEach(r => { map[r.studentId] = r.isPresent; });
-      setAttendanceMap(map);
-    }
-  };
-
-  const handleClassChange = (classId: string) => {
-    setSelectedClassId(classId);
-    if (classId && examStats) {
-      const cr = examStats.classReports.find(c => c.classId === classId);
-      if (cr) {
-        const map: Record<string, boolean> = {};
-        cr.results.forEach(r => { map[r.studentId] = r.isPresent; });
-        setAttendanceMap(map);
+        // اختيار أول امتحان تلقائياً
+        if (examsList.length > 0) {
+          setSelectedExamId(examsList[0].id);
+        }
+      } catch (err) {
+        console.error('خطأ في تحميل الامتحانات:', err);
+      } finally {
+        setInitialLoading(false);
       }
-    }
+    };
+
+    loadExams();
+  }, []);
+
+  // ═══ Load Statistics When Exam Selected ═══
+  useEffect(() => {
+    if (!selectedExamId) return;
+
+    const loadStatistics = async () => {
+      setLoading(true);
+      try {
+        // 1. جلب الامتحان
+        const examDoc = await getDocs(
+          query(collection(db, 'exams'), where('__name__', '==', selectedExamId))
+        );
+
+        if (examDoc.empty) {
+          setStatistics(null);
+          setLoading(false);
+          return;
+        }
+
+        const examData = examDoc.docs[0].data() as Exam;
+        const exam: Exam = {
+          ...examData,
+          id: selectedExamId,
+          createdAt: examData.createdAt instanceof Timestamp ? examData.createdAt.toDate() : new Date(),
+          startTime: examData.startTime instanceof Timestamp ? examData.startTime.toDate() : examData.startTime ? new Date(examData.startTime) : undefined,
+          endTime: examData.endTime instanceof Timestamp ? examData.endTime.toDate() : examData.endTime ? new Date(examData.endTime) : undefined,
+        };
+
+        // 2. جلب الإجابات
+        const answersSnap = await getDocs(
+          query(collection(db, 'studentAnswers'), where('examId', '==', selectedExamId))
+        );
+
+        const answers: StudentAnswer[] = answersSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            ...data,
+            id: doc.id,
+            startedAt: data.startedAt instanceof Timestamp ? data.startedAt.toDate() : new Date(),
+            submittedAt: data.submittedAt instanceof Timestamp ? data.submittedAt?.toDate() : undefined,
+          } as StudentAnswer;
+        });
+
+        // 3. جلب الطلاب
+        const studentsSnap = await getDocs(collection(db, 'students'));
+        const studentsMap = new Map(
+          studentsSnap.docs.map(doc => [doc.id, doc.data()])
+        );
+
+        // 4. بناء النتائج
+        const classReportsMap = new Map<string, ClassReport>();
+
+        // تحضير الفصول
+        exam.classIds.forEach((classId, idx) => {
+          const className = (examData as any).classNames?.[idx] as string || classId;
+          classReportsMap.set(classId, {
+            classId,
+            className,
+            totalStudents: 0,
+            presentCount: 0,
+            passCount: 0,
+            averageScore: 0,
+            passRate: 0,
+            results: [],
+          });
+        });
+
+        // معالجة الإجابات
+        answers.forEach(answer => {
+          const student = studentsMap.get(answer.studentId);
+          if (!student) return;
+
+          const classId = student.classId;
+          const classReport = classReportsMap.get(classId);
+          if (!classReport) return;
+
+          const score = answer.score || 0;
+          const percentage = (score / exam.totalScore) * 100;
+          const grade = getGradeLabel(percentage);
+
+          const result: StudentResult = {
+            studentId: answer.studentId,
+            studentName: answer.studentName || student.name,
+            studentNumber: student.number || 0,
+            classId,
+            className: classReport.className,
+            score,
+            totalScore: exam.totalScore,
+            percentage: Math.round(percentage * 100) / 100,
+            grade,
+            isPresent: answer.isSubmitted || false,
+          };
+
+          classReport.results.push(result);
+          classReport.totalStudents++;
+          if (answer.isSubmitted) {
+            classReport.presentCount++;
+            if (percentage >= 50) {
+              classReport.passCount++;
+            }
+          }
+        });
+
+        // حساب المتوسطات
+        classReportsMap.forEach(report => {
+          if (report.presentCount > 0) {
+            const totalScore = report.results
+              .filter(r => r.isPresent)
+              .reduce((sum, r) => sum + r.score, 0);
+            report.averageScore = Math.round((totalScore / report.presentCount) * 100) / 100;
+            report.passRate = Math.round((report.passCount / report.presentCount) * 100 * 100) / 100;
+          }
+
+          // ترتيب النتائج حسب الدرجة
+          report.results.sort((a, b) => b.score - a.score);
+        });
+
+        const classReports = Array.from(classReportsMap.values());
+
+        // 5. الإحصائيات العامة
+        const totalStudents = classReports.reduce((sum, r) => sum + r.totalStudents, 0);
+        const attendedCount = classReports.reduce((sum, r) => sum + r.presentCount, 0);
+        const passCount = classReports.reduce((sum, r) => sum + r.passCount, 0);
+        const failCount = attendedCount - passCount;
+        const absentCount = totalStudents - attendedCount;
+
+        const allScores = classReports.flatMap(r => r.results.filter(res => res.isPresent).map(res => res.score));
+        const averageScore = allScores.length > 0
+          ? Math.round((allScores.reduce((sum, s) => sum + s, 0) / allScores.length) * 100) / 100
+          : 0;
+        const passRate = attendedCount > 0
+          ? Math.round((passCount / attendedCount) * 100 * 100) / 100
+          : 0;
+        const highestScore = allScores.length > 0 ? Math.max(...allScores) : 0;
+        const lowestScore = allScores.length > 0 ? Math.min(...allScores) : 0;
+
+        setStatistics({
+          examId: selectedExamId,
+          title: exam.title,
+          subjectName: exam.subjectName,
+          totalStudents,
+          attendedCount,
+          passCount,
+          failCount,
+          absentCount,
+          averageScore,
+          passRate,
+          highestScore,
+          lowestScore,
+          totalScore: exam.totalScore,
+          classReports,
+        });
+      } catch (err) {
+        console.error('خطأ في تحميل الإحصائيات:', err);
+        setStatistics(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadStatistics();
+  }, [selectedExamId]);
+
+  // ═══ Download Report as CSV ═══
+  const downloadCSV = () => {
+    if (!statistics) return;
+
+    let csv = 'رقم الطالب,اسم الطالب,الفصل,الدرجة,من,النسبة%,التقدير,حالة الحضور\n';
+
+    statistics.classReports.forEach(classReport => {
+      classReport.results.forEach(result => {
+        csv += `${result.studentNumber},${result.studentName},${result.className},${result.score},${result.totalScore},${result.percentage},${result.grade},${result.isPresent ? 'حضر' : 'غائب'}\n`;
+      });
+    });
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `تقرير_${statistics.title}.csv`;
+    link.click();
   };
 
-  const saveAttendance = () => {
-    // اربط هنا بـ API الحقيقية
-    setAttendanceSaved(true);
-    setTimeout(() => setAttendanceSaved(false), 3000);
-  };
+  if (initialLoading) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '60vh',
+        fontFamily: 'Cairo, sans-serif',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '4px solid #e2e8f0',
+            borderTop: '4px solid #2555a0',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px',
+          }} />
+          <p style={{ color: '#64748b', fontSize: '14px' }}>جاري تحميل الامتحانات...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
-  const presentCount = classReport
-    ? Object.values(attendanceMap).filter(Boolean).length
-    : 0;
+  if (exams.length === 0) {
+    return (
+      <div style={{ fontFamily: 'Cairo, sans-serif', direction: 'rtl' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f2244', marginBottom: '24px' }}>
+          التقارير والإحصائيات
+        </h1>
+
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '60px 24px',
+          textAlign: 'center',
+          border: '1px solid #f0f4f8',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        }}>
+          <AlertCircle size={48} color="#94a3b8" style={{ marginBottom: '16px' }} />
+          <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f2244', marginBottom: '8px' }}>
+            لا توجد امتحانات متاحة
+          </h3>
+          <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '24px' }}>
+            لم يتم إنشاء أي امتحان بعد. قم بإنشاء امتحان لعرض التقارير.
+          </p>
+          <button
+            onClick={() => navigate('/exams/new')}
+            style={{
+              background: '#2555a0',
+              color: 'white',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '12px 24px',
+              fontSize: '14px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              fontFamily: 'Cairo, sans-serif',
+            }}
+          >
+            إنشاء امتحان جديد
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f9fafb', padding: '1.5rem', direction: 'rtl' }}>
+    <div style={{ fontFamily: 'Cairo, sans-serif', direction: 'rtl' }}>
       {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 500, color: '#111827', margin: 0 }}>📊 التقارير والإحصائيات</h1>
-        <p style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>عرض نتائج الامتحانات وإحصائيات الفصول</p>
-      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f2244', marginBottom: '4px' }}>
+            التقارير والإحصائيات
+          </h1>
+          <p style={{ color: '#64748b', fontSize: '13px' }}>
+            تحليل مفصل لنتائج الامتحانات
+          </p>
+        </div>
 
-      {/* Exam Selector */}
-      <div style={{ background: '#fff', borderRadius: 14, border: '0.5px solid #e5e7eb', padding: 16, marginBottom: '1.5rem' }}>
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 8 }}>اختر الامتحان</label>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <select
             value={selectedExamId}
-            onChange={e => handleExamChange(e.target.value)}
-            style={{ flex: 1, border: '0.5px solid #d1d5db', borderRadius: 8, padding: '8px 12px', fontSize: 13, background: '#fff', color: '#111827' }}
+            onChange={(e) => setSelectedExamId(e.target.value)}
+            style={{
+              padding: '10px 14px',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: '10px',
+              fontSize: '13px',
+              fontWeight: '600',
+              fontFamily: 'Cairo, sans-serif',
+              color: '#1a202c',
+              background: 'white',
+              cursor: 'pointer',
+              minWidth: '200px',
+            }}
           >
-            <option value="">-- اختر امتحان --</option>
-            {MOCK_EXAMS.map(e => (
-              <option key={e.id} value={e.id}>{e.title} - {e.subjectName}</option>
+            {exams.map(exam => (
+              <option key={exam.id} value={exam.id}>
+                {exam.title} - {exam.subjectName}
+              </option>
             ))}
           </select>
 
-          {examStats && (
-            <select
-              value={selectedClassId}
-              onChange={e => handleClassChange(e.target.value)}
-              style={{ border: '0.5px solid #d1d5db', borderRadius: 8, padding: '8px 12px', fontSize: 13, background: '#fff', color: '#111827' }}
+          {statistics && (
+            <button
+              onClick={downloadCSV}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '10px 16px',
+                background: '#059669',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                fontFamily: 'Cairo, sans-serif',
+              }}
             >
-              <option value="">-- كل الفصول --</option>
-              {examStats.classReports.map(cr => (
-                <option key={cr.classId} value={cr.classId}>{cr.className}</option>
-              ))}
-            </select>
+              <Download size={15} />
+              تحميل CSV
+            </button>
           )}
         </div>
       </div>
 
-      {/* Empty state */}
-      {!examStats && (
-        <div style={{ background: '#fff', borderRadius: 14, border: '0.5px solid #e5e7eb', padding: '4rem 1rem', textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
-          <h3 style={{ fontSize: 15, fontWeight: 500, color: '#6b7280', margin: '0 0 6px' }}>اختر امتحاناً للبدء</h3>
-          <p style={{ fontSize: 13, color: '#9ca3af' }}>اختر امتحاناً من القائمة أعلاه لعرض إحصائياته وتقاريره</p>
+      {loading ? (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '40vh',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{
+              width: '50px',
+              height: '50px',
+              border: '4px solid #e2e8f0',
+              borderTop: '4px solid #2555a0',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 16px',
+            }} />
+            <p style={{ color: '#64748b', fontSize: '14px' }}>جاري تحميل الإحصائيات...</p>
+          </div>
         </div>
-      )}
+      ) : !statistics ? (
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '40px 24px',
+          textAlign: 'center',
+          border: '1px solid #f0f4f8',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        }}>
+          <AlertCircle size={48} color="#94a3b8" style={{ marginBottom: '16px' }} />
+          <p style={{ fontSize: '14px', color: '#64748b' }}>
+            لا توجد بيانات متاحة لهذا الامتحان
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Summary Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '16px',
+            marginBottom: '24px',
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '16px',
+              border: '1px solid #f0f4f8',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <Users size={18} color="#2555a0" />
+                <p style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>إجمالي الطلاب</p>
+              </div>
+              <p style={{ fontSize: '28px', fontWeight: '900', color: '#0f2244' }}>{statistics.totalStudents}</p>
+            </div>
 
-      {/* Tabs + Content */}
-      {examStats && (
-        <div style={{ background: '#fff', borderRadius: 14, border: '0.5px solid #e5e7eb', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', borderBottom: '0.5px solid #e5e7eb' }}>
-            <TabButton active={activeTab === 'overview'}    onClick={() => setActiveTab('overview')}>📈 نظرة عامة</TabButton>
-            <TabButton active={activeTab === 'class'}       onClick={() => setActiveTab('class')}>📋 تقرير الفصل</TabButton>
-            <TabButton active={activeTab === 'attendance'}  onClick={() => setActiveTab('attendance')}>✅ الحضور</TabButton>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '16px',
+              border: '1px solid #f0f4f8',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <CheckCircle size={18} color="#059669" />
+                <p style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>الحضور</p>
+              </div>
+              <p style={{ fontSize: '28px', fontWeight: '900', color: '#059669' }}>{statistics.attendedCount}</p>
+            </div>
+
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '16px',
+              border: '1px solid #f0f4f8',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <Award size={18} color="#d97706" />
+                <p style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>المتوسط</p>
+              </div>
+              <p style={{ fontSize: '28px', fontWeight: '900', color: '#d97706' }}>
+                {statistics.averageScore} / {statistics.totalScore}
+              </p>
+            </div>
+
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '16px',
+              border: '1px solid #f0f4f8',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <TrendingUp size={18} color="#7c3aed" />
+                <p style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>نسبة النجاح</p>
+              </div>
+              <p style={{ fontSize: '28px', fontWeight: '900', color: '#7c3aed' }}>{statistics.passRate}%</p>
+            </div>
           </div>
 
-          {/* ── Overview ── */}
-          {activeTab === 'overview' && (
-            <div style={{ padding: 20 }}>
-              <h2 style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 4px' }}>{examStats.title}</h2>
-              <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>{examStats.subjectName}</p>
+          {/* Tabs */}
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '24px',
+            border: '1px solid #f0f4f8',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+          }}>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '2px solid #f0f4f8' }}>
+              {[
+                { key: 'overview', label: 'نظرة عامة', icon: <BarChart2 size={16} /> },
+                { key: 'class', label: 'تفاصيل الفصول', icon: <BookOpen size={16} /> },
+                { key: 'attendance', label: 'الحضور والغياب', icon: <Users size={16} /> },
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key as TabKey)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '10px 16px',
+                    background: activeTab === tab.key ? '#eff6ff' : 'transparent',
+                    color: activeTab === tab.key ? '#2555a0' : '#64748b',
+                    border: 'none',
+                    borderBottom: activeTab === tab.key ? '2px solid #2555a0' : 'none',
+                    fontWeight: activeTab === tab.key ? '700' : '600',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo, sans-serif',
+                    marginBottom: '-2px',
+                  }}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(100px,1fr))', gap: 10, marginBottom: 20 }}>
-                <StatCard label="إجمالي الطلاب"  value={examStats.totalStudents}  icon="👥" bg="#eff6ff" color="#1d4ed8" />
-                <StatCard label="الحاضرون"        value={examStats.attendedCount}  icon="✅" bg="#f0fdf4" color="#15803d" />
-                <StatCard label="ناجحون"          value={examStats.passCount}      icon="🎯" bg="#f0fdf4" color="#15803d" />
-                <StatCard label="راسبون"          value={examStats.failCount}      icon="❌" bg="#fef2f2" color="#b91c1c" />
-                <StatCard label="المتوسط"         value={examStats.averageScore}   icon="📊" bg="#fffbeb" color="#b45309" />
-                <StatCard label="نسبة النجاح"     value={`${examStats.passRate}%`} icon="📈" bg="#faf5ff" color="#7e22ce" />
-              </div>
-
-              <h3 style={{ fontSize: 14, fontWeight: 500, color: '#111827', margin: '0 0 10px' }}>تقارير الفصول</h3>
-              {examStats.classReports.map(cr => (
-                <div key={cr.classId} style={{ background: '#f9fafb', borderRadius: 10, padding: '12px 16px', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 500, color: '#111827', margin: 0 }}>{cr.className}</p>
-                    <p style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>{cr.presentCount}/{cr.totalStudents} حاضر · {cr.passCount} ناجح</p>
+            {/* Tab Content */}
+            {activeTab === 'overview' && (
+              <div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: '12px',
+                  marginBottom: '20px',
+                }}>
+                  <div style={{ padding: '12px', background: '#ecfdf5', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                    <p style={{ fontSize: '11px', color: '#059669', fontWeight: '600', marginBottom: '4px' }}>ناجح</p>
+                    <p style={{ fontSize: '22px', fontWeight: '900', color: '#059669' }}>{statistics.passCount}</p>
                   </div>
-                  <div style={{ textAlign: 'left' }}>
-                    <p style={{ fontSize: 18, fontWeight: 500, color: gradeColor(cr.averageScore), margin: 0 }}>{cr.averageScore}</p>
-                    <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>متوسط</p>
+                  <div style={{ padding: '12px', background: '#fef2f2', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                    <p style={{ fontSize: '11px', color: '#ef4444', fontWeight: '600', marginBottom: '4px' }}>راسب</p>
+                    <p style={{ fontSize: '22px', fontWeight: '900', color: '#ef4444' }}>{statistics.failCount}</p>
+                  </div>
+                  <div style={{ padding: '12px', background: '#fef3c7', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                    <p style={{ fontSize: '11px', color: '#d97706', fontWeight: '600', marginBottom: '4px' }}>غائب</p>
+                    <p style={{ fontSize: '22px', fontWeight: '900', color: '#d97706' }}>{statistics.absentCount}</p>
+                  </div>
+                  <div style={{ padding: '12px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
+                    <p style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '600', marginBottom: '4px' }}>أعلى درجة</p>
+                    <p style={{ fontSize: '22px', fontWeight: '900', color: '#7c3aed' }}>{statistics.highestScore}</p>
+                  </div>
+                  <div style={{ padding: '12px', background: '#eff6ff', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
+                    <p style={{ fontSize: '11px', color: '#2555a0', fontWeight: '600', marginBottom: '4px' }}>أقل درجة</p>
+                    <p style={{ fontSize: '22px', fontWeight: '900', color: '#2555a0' }}>{statistics.lowestScore}</p>
                   </div>
                 </div>
-              ))}
-
-              <div style={{ marginTop: 16 }}>
-                <button
-                  onClick={() => console.log('export all')}
-                  style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, border: '0.5px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
-                >
-                  💾 تصدير الكل Excel
-                </button>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* ── Class Report ── */}
-          {activeTab === 'class' && (
-            <div style={{ padding: 20 }}>
-              {!classReport ? (
-                <EmptyState message="اختر فصلاً لعرض التقرير التفصيلي" />
-              ) : (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-                    <div>
-                      <h2 style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: 0 }}>نتائج: {classReport.className}</h2>
-                      <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                        حاضر {classReport.presentCount} · ناجح {classReport.passCount} · متوسط {classReport.averageScore}
-                      </p>
+            {activeTab === 'class' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {statistics.classReports.map(classReport => (
+                  <div
+                    key={classReport.classId}
+                    style={{
+                      background: '#f8fafc',
+                      borderRadius: '12px',
+                      padding: '16px',
+                      border: '1px solid #e2e8f0',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ fontSize: '16px', fontWeight: '800', color: '#0f2244' }}>
+                        {classReport.className}
+                      </h4>
+                      <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
+                        <span style={{ color: '#64748b' }}>
+                          الحضور: <strong style={{ color: '#059669' }}>{classReport.presentCount}</strong>
+                        </span>
+                        <span style={{ color: '#64748b' }}>
+                          المتوسط: <strong style={{ color: '#d97706' }}>{classReport.averageScore}</strong>
+                        </span>
+                        <span style={{ color: '#64748b' }}>
+                          النجاح: <strong style={{ color: '#7c3aed' }}>{classReport.passRate}%</strong>
+                        </span>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => console.log('export class')}
-                      style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, border: '0.5px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
-                    >
-                      💾 تصدير Excel
-                    </button>
-                  </div>
 
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                      <thead>
-                        <tr>
-                          {['#', 'الطالب', 'الدرجة', 'النسبة', 'التقدير', 'النتيجة'].map(h => (
-                            <th key={h} style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500, fontSize: 12, color: '#6b7280', borderBottom: '0.5px solid #e5e7eb' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {classReport.results.map((r, idx) => (
-                          <tr key={r.studentId} style={{ opacity: r.isPresent ? 1 : 0.5 }}>
-                            <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: 12, textAlign: 'center' }}>
-                              {r.isPresent ? <strong>{idx + 1}</strong> : '-'}
-                            </td>
-                            <td style={{ padding: '10px 12px', fontWeight: 500, color: '#111827' }}>{r.studentName}</td>
-                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                              {r.isPresent
-                                ? <span style={{ fontWeight: 500, color: '#111827' }}>{r.score}<span style={{ color: '#9ca3af', fontSize: 11 }}>/{r.totalScore}</span></span>
-                                : <span style={{ color: '#9ca3af', fontSize: 12 }}>غائب</span>}
-                            </td>
-                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                              {r.isPresent ? <span style={{ fontWeight: 500, color: gradeColor(r.percentage) }}>{r.percentage}%</span> : '-'}
-                            </td>
-                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                              {r.isPresent ? <span style={{ fontWeight: 500, color: gradeColor(r.percentage) }}>{r.grade}</span> : '-'}
-                            </td>
-                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                              {r.isPresent ? (
-                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: r.percentage >= 50 ? '#d1fae5' : '#fee2e2', color: r.percentage >= 50 ? '#065f46' : '#991b1b' }}>
-                                  {r.percentage >= 50 ? 'ناجح' : 'راسب'}
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: '#f3f4f6', color: '#4b5563' }}>غائب</span>
-                              )}
-                            </td>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'white', borderBottom: '2px solid #e2e8f0' }}>
+                            <th style={{ padding: '8px', textAlign: 'right', fontWeight: '700', color: '#64748b' }}>الرقم</th>
+                            <th style={{ padding: '8px', textAlign: 'right', fontWeight: '700', color: '#64748b' }}>الاسم</th>
+                            <th style={{ padding: '8px', textAlign: 'center', fontWeight: '700', color: '#64748b' }}>الدرجة</th>
+                            <th style={{ padding: '8px', textAlign: 'center', fontWeight: '700', color: '#64748b' }}>النسبة</th>
+                            <th style={{ padding: '8px', textAlign: 'center', fontWeight: '700', color: '#64748b' }}>التقدير</th>
+                            <th style={{ padding: '8px', textAlign: 'center', fontWeight: '700', color: '#64748b' }}>الحالة</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── Attendance ── */}
-          {activeTab === 'attendance' && (
-            <div style={{ padding: 20 }}>
-              {!classReport ? (
-                <EmptyState message="اختر فصلاً لعرض سجل الحضور والغياب" />
-              ) : (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-                    <div>
-                      <h2 style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: 0 }}>سجل حضور: {classReport.className}</h2>
-                      <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                        حاضر: {presentCount} | غائب: {classReport.results.length - presentCount}
-                      </p>
+                        </thead>
+                        <tbody>
+                          {classReport.results.map(result => (
+                            <tr key={result.studentId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px', color: '#0f2244', fontWeight: '600' }}>{result.studentNumber}</td>
+                              <td style={{ padding: '8px', color: '#0f2244' }}>{result.studentName}</td>
+                              <td style={{ padding: '8px', textAlign: 'center', fontWeight: '700', color: result.isPresent ? gradeColor(result.percentage) : '#94a3b8' }}>
+                                {result.isPresent ? `${result.score} / ${result.totalScore}` : '-'}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'center', fontWeight: '700', color: result.isPresent ? gradeColor(result.percentage) : '#94a3b8' }}>
+                                {result.isPresent ? `${result.percentage}%` : '-'}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'center' }}>
+                                {result.isPresent ? (
+                                  <span style={{
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    background: result.percentage >= 85 ? '#ecfdf5' : result.percentage >= 50 ? '#eff6ff' : '#fef2f2',
+                                    color: gradeColor(result.percentage),
+                                  }}>
+                                    {result.grade}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#94a3b8' }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'center' }}>
+                                {result.isPresent ? (
+                                  <CheckCircle size={16} color="#059669" />
+                                ) : (
+                                  <XCircle size={16} color="#ef4444" />
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      {attendanceSaved && <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 500 }}>✅ تم الحفظ</span>}
-                      <button
-                        onClick={saveAttendance}
-                        style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer' }}
-                      >
-                        💾 حفظ الحضور
-                      </button>
-                    </div>
                   </div>
+                ))}
+              </div>
+            )}
 
-                  <div style={{ border: '0.5px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-                    {classReport.results.map(r => (
-                      <div key={r.studentId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '0.5px solid #f3f4f6' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ fontSize: 12, color: '#9ca3af', width: 20, textAlign: 'center' }}>{r.studentNumber}</span>
-                          <span style={{ fontSize: 14, color: '#111827' }}>{r.studentName}</span>
+            {activeTab === 'attendance' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {statistics.classReports.map(classReport => {
+                  const absentStudents = classReport.results.filter(r => !r.isPresent);
+                  return (
+                    <div
+                      key={classReport.classId}
+                      style={{
+                        background: '#f8fafc',
+                        borderRadius: '12px',
+                        padding: '16px',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <h4 style={{ fontSize: '15px', fontWeight: '800', color: '#0f2244', marginBottom: '12px' }}>
+                        {classReport.className}
+                      </h4>
+
+                      <div style={{ display: 'flex', gap: '16px', marginBottom: '12px' }}>
+                        <div style={{ padding: '10px 16px', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                          <p style={{ fontSize: '11px', color: '#059669', marginBottom: '4px' }}>حاضر</p>
+                          <p style={{ fontSize: '20px', fontWeight: '900', color: '#059669' }}>{classReport.presentCount}</p>
                         </div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            onClick={() => setAttendanceMap(prev => ({ ...prev, [r.studentId]: true }))}
-                            style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer', border: '0.5px solid', background: attendanceMap[r.studentId] === true ? '#16a34a' : '#f9fafb', color: attendanceMap[r.studentId] === true ? '#fff' : '#6b7280', borderColor: attendanceMap[r.studentId] === true ? '#16a34a' : '#e5e7eb' }}
-                          >
-                            حاضر
-                          </button>
-                          <button
-                            onClick={() => setAttendanceMap(prev => ({ ...prev, [r.studentId]: false }))}
-                            style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer', border: '0.5px solid', background: attendanceMap[r.studentId] === false ? '#dc2626' : '#f9fafb', color: attendanceMap[r.studentId] === false ? '#fff' : '#6b7280', borderColor: attendanceMap[r.studentId] === false ? '#dc2626' : '#e5e7eb' }}
-                          >
-                            غائب
-                          </button>
+                        <div style={{ padding: '10px 16px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                          <p style={{ fontSize: '11px', color: '#ef4444', marginBottom: '4px' }}>غائب</p>
+                          <p style={{ fontSize: '20px', fontWeight: '900', color: '#ef4444' }}>{absentStudents.length}</p>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+
+                      {absentStudents.length > 0 && (
+                        <div>
+                          <p style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginBottom: '8px' }}>
+                            الطلاب الغائبون:
+                          </p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {absentStudents.map(student => (
+                              <span
+                                key={student.studentId}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: 'white',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  color: '#0f2244',
+                                  border: '1px solid #e2e8f0',
+                                }}
+                              >
+                                {student.studentName}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
-}
+};
+
+export default Reports;
